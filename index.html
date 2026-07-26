@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#123524">
+<title>KINGS CORNER — The City Hall Park Table</title>
+<meta name="description" content="Kings Corner on the City Hall Park table — build the cross-streets down, claim the corners with Kings, and out-play the Mayor. A Btown Games production from the BTown Brief.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="KINGS CORNER — The City Hall Park Table">
+<meta property="og:description" content="The four corners of City Hall Park are open — Kings only. Shed your hand before the Mayor sheds his.">
+<meta property="og:url" content="https://play.btownbrief.com/kings-corner/">
+<meta property="og:image" content="https://play.btownbrief.com/kings-corner/icon-180.png">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- Title screen -->
+  <div id="menu" class="screen">
+    <div class="menu-inner">
+      <div id="logo" aria-label="Kings Corner">
+        <span class="l-kings"><i>K</i><i>I</i><i>N</i><i>G</i><i>S</i></span>
+        <span class="l-corner">CORNER</span>
+        <span class="l-deck">🌳 the City Hall Park table 🌳</span>
+      </div>
+      <div id="tagline">Build the cross-streets down, brick by brick —<br>but the corners of the park belong to Kings.</div>
+
+      <button id="resumeBtn" class="big-btn hidden">↩&nbsp; BACK TO THE PARK</button>
+      <button id="botBtn" class="big-btn">🎩&nbsp; TAKE ON THE MAYOR</button>
+      <button id="passBtn" class="mode-btn">📱 PASS &amp; PLAY (2 PLAYERS)</button>
+
+      <div id="howto">
+        <div class="howto-line"><span class="key">DRAW ONE</span> tap the stack to start your turn</div>
+        <div class="howto-line"><span class="key">PLAY DOWN</span> one rank lower, opposite color</div>
+        <div class="howto-line"><span class="key">KINGS ONLY</span> in the four park corners</div>
+      </div>
+    </div>
+    <footer id="credit">
+      A Btown Games production · <a href="https://www.btownbrief.com" target="_blank" rel="noopener">Read the BTown Brief →</a>
+    </footer>
+  </div>
+
+  <!-- Pass-the-phone interstitial -->
+  <div id="handoff" class="screen hidden">
+    <div class="menu-inner">
+      <div class="handoff-card">
+        <div class="handoff-emoji">🤝</div>
+        <div id="handoffTitle">Pass the phone to Player 2</div>
+        <div class="handoff-sub">No peeking — it's a small town, word gets around.</div>
+        <button id="handoffBtn" class="big-btn">👀&nbsp; SHOW MY HAND</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- The park -->
+  <div id="game" class="hidden">
+    <div id="topbar">
+      <button id="homeBtn" aria-label="Back to menu">🏠</button>
+      <div id="opponents"></div>
+    </div>
+
+    <div id="table">
+      <div id="park">
+        <div class="cell corner" data-pile="NW"><div class="pilecards"></div><div class="cell-label">🌳</div></div>
+        <div class="cell foundation" data-pile="N"><div class="pilecards"></div><div class="cell-label">PEARL ST</div></div>
+        <div class="cell corner" data-pile="NE"><div class="pilecards"></div><div class="cell-label">🌳</div></div>
+        <div class="cell foundation" data-pile="W"><div class="pilecards"></div><div class="cell-label">BANK ST</div></div>
+        <div class="cell center">
+          <div id="stock" role="button" aria-label="Draw a card">
+            <div class="cardback"><span>🍁</span></div>
+            <div class="cardback under u1"></div>
+            <div class="cardback under u2"></div>
+            <div class="cardback under u3"></div>
+          </div>
+          <div id="stockCount"></div>
+        </div>
+        <div class="cell foundation" data-pile="E"><div class="pilecards"></div><div class="cell-label">CHERRY ST</div></div>
+        <div class="cell corner" data-pile="SW"><div class="pilecards"></div><div class="cell-label">🌳</div></div>
+        <div class="cell foundation" data-pile="S"><div class="pilecards"></div><div class="cell-label">MAIN ST</div></div>
+        <div class="cell corner" data-pile="SE"><div class="pilecards"></div><div class="cell-label">🌳</div></div>
+      </div>
+      <div id="msg"></div>
+      <button id="endTurnBtn" class="chip-btn hidden">✅&nbsp; END TURN</button>
+    </div>
+
+    <div id="handArea">
+      <div id="handLabel"></div>
+      <div id="hand"></div>
+    </div>
+  </div>
+
+  <!-- Round over -->
+  <div id="gameover" class="screen hidden">
+    <div class="menu-inner">
+      <div id="go-card">
+        <div id="go-title"></div>
+        <div id="go-line"></div>
+        <div id="go-btns">
+          <button id="againBtn" class="big-btn">↻&nbsp; RUN IT BACK</button>
+          <button id="menuBtn" class="chip-btn">🏠&nbsp; MENU</button>
+        </div>
+        <a id="brief-cta" href="https://www.btownbrief.com" target="_blank" rel="noopener">
+          🗞️ The Mayor reads it. So should you.<br><strong>Read the BTown Brief →</strong>
+        </a>
+      </div>
+    </div>
+    <footer id="credit-go">
+      A Btown Games production · <a href="https://www.btownbrief.com" target="_blank" rel="noopener">Read the BTown Brief →</a>
+    </footer>
+  </div>
+
+</div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
