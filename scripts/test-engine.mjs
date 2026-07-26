@@ -123,6 +123,39 @@ function allCards(state) {
     'corner pile builds K down to 8, alternating colors');
 }
 
+/* -------------------------------- dealt King moves to an empty corner */
+{
+  const s = fixture({
+    hands: [['5H', '7C'], ['2C', '3C']],
+    piles: {
+      ...emptyPiles(),
+      N: ['KD', 'QS'], E: ['TS'], S: ['9D'], W: ['QC'],
+      NW: ['KC', 'QH'],
+    },
+    stock: [],
+    currentPlayer: 0,
+  });
+  const moves = legalMoves(s);
+  assert(moves.some((m) => m.type === 'move' && m.from === 'N' && m.to === 'NE'),
+    'a King-based foundation pile may move to an empty corner');
+  assert(!moves.some((m) => m.type === 'move' && m.from === 'NW' && m.to === 'NE'),
+    'a corner pile cannot move to another empty corner');
+
+  const relocated = applyMove(s, { type: 'move', from: 'N', to: 'NE' });
+  assert(relocated.piles.N.length === 0 &&
+    JSON.stringify(relocated.piles.NE) === JSON.stringify(['KD', 'QS']),
+    'the dealt-King pile relocates intact and empties its foundation');
+  const refilled = applyMove(relocated, { type: 'play', card: '5H', to: 'N' });
+  assert(JSON.stringify(refilled.piles.N) === JSON.stringify(['5H']),
+    'the foundation emptied by a dealt King accepts any hand card');
+
+  const { chooseMove } = await import('../js/bot.js');
+  const botMove = chooseMove(s);
+  assert(botMove.type === 'move' && botMove.from === 'N' &&
+    CORNERS.includes(botMove.to) && s.piles[botMove.to].length === 0,
+    'the bot prefers moving a King-based foundation pile into an empty corner');
+}
+
 /* --------------------------------------- refilling an emptied foundation */
 {
   const s = fixture({
@@ -168,6 +201,24 @@ function allCards(state) {
   assert(!legalMoves(dry).some((m) => m.type === 'draw') &&
     legalMoves(dry).some((m) => m.type === 'play'),
     'empty stock: no draw required, straight to playing');
+
+  let lastDraw = fixture({
+    hands: [['4C'], ['2H']],
+    piles: { ...emptyPiles(), N: ['9H'], E: ['TS'], S: ['9D'], W: ['QC'] },
+    stock: ['7C'],
+    currentPlayer: 0,
+    hasDrawn: false,
+    passesInARow: 1,
+  });
+  lastDraw = applyMove(lastDraw, { type: 'draw' });
+  assert(lastDraw.stock.length === 0 && lastDraw.passesInARow === 0,
+    'drawing the last stock card resets passes accrued while stock remained');
+  lastDraw = applyMove(lastDraw, { type: 'endTurn' });
+  assert(getStatus(lastDraw).status === 'active' && lastDraw.passesInARow === 1,
+    'gridlock needs a fresh full lap after the stock becomes empty');
+  lastDraw = applyMove(lastDraw, { type: 'endTurn' });
+  assert(getStatus(lastDraw).status === 'blocked',
+    'gridlock starts after that fresh full lap is complete');
 }
 
 /* --------------------------------------------------------- win detection */

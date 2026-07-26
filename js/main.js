@@ -18,7 +18,6 @@ const SUIT_ORDER = { S: 0, H: 1, C: 2, D: 3 }; // alternate colors in the fan
 const RANK_CHAR = { T: '10' };
 const RANK_SORT = 'A23456789TJQK';
 const MAX_SHOWN = 4;   // cards visibly cascaded per pile
-const CASCADE = 13;    // px between cascaded cards
 
 /* Where things are, Burlington-wise. */
 const PILE_NAME = {
@@ -159,7 +158,7 @@ function render(fx = {}) {
     const shown = pile.slice(-MAX_SHOWN);
     shown.forEach((card, i) => {
       const el = cardEl(card);
-      el.style.top = (i * CASCADE) + 'px';
+      el.style.top = `calc(${i} * var(--cascade))`;
       if (i < shown.length - 1) el.classList.add('under');
       pc.appendChild(el);
     });
@@ -393,6 +392,11 @@ $('stock').addEventListener('click', (e) => {
   $('msg').innerHTML = G.state.stock.length === 0
     ? 'The stack is spent — play what you hold.'
     : 'One draw per turn — play on, or end your turn.';
+});
+$('stock').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  e.preventDefault();
+  e.currentTarget.click();
 });
 
 $('endTurnBtn').addEventListener('click', (e) => {

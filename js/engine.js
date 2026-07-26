@@ -98,8 +98,8 @@ export function createInitialState(options = {}) {
   }
   let i = numPlayers * 7;
 
-  // Flip one card to each foundation. A flipped King simply stays put — a
-  // pile based on a King can never move, but plays on it work as usual.
+  // Flip one card to each foundation. A pile based on a dealt King may move
+  // into an empty corner on a later turn.
   const piles = { NE: [], SE: [], SW: [], NW: [] };
   for (const f of FOUNDATIONS) piles[f] = [deck[i++]];
 
@@ -148,15 +148,20 @@ export function legalMoves(state) {
     }
   }
 
-  // Whole-pile moves: the moved pile's BASE card must fit the target's
-  // exposed card. (A pile based on a King can never move — nothing outranks
-  // a King — so corner piles always stay put.)
-  for (const from of PILES) {
+  // Whole-pile moves start only from foundations, so corner piles never
+  // move. The BASE card must fit a nonempty target's exposed card. A
+  // King-based foundation pile may instead claim an empty corner.
+  for (const from of FOUNDATIONS) {
     const pile = state.piles[from];
     if (pile.length === 0) continue;
     for (const to of PILES) {
-      if (to === from || state.piles[to].length === 0) continue;
-      if (fitsOn(baseCard(pile), exposedCard(state.piles[to]))) {
+      if (to === from) continue;
+      const target = state.piles[to];
+      if (target.length === 0) {
+        if (CORNERS.includes(to) && rankOf(baseCard(pile)) === 'K') {
+          moves.push({ type: 'move', from, to });
+        }
+      } else if (fitsOn(baseCard(pile), exposedCard(target))) {
         moves.push({ type: 'move', from, to });
       }
     }
@@ -187,11 +192,15 @@ export function applyMove(state, move) {
 function applyDraw(state) {
   const player = state.currentPlayer;
   const drawn = state.stock[state.stock.length - 1];
+  const emptiesStock = state.stock.length === 1;
   return {
     ...state,
     hands: state.hands.map((h, p) => (p === player ? h.concat([drawn]) : h)),
     stock: state.stock.slice(0, -1),
     hasDrawn: true,
+    // Any passes recorded while cards remained cannot count toward the
+    // stock-out gridlock lap.
+    passesInARow: emptiesStock ? 0 : state.passesInARow,
     lastAction: { player, type: 'draw' },
   };
 }

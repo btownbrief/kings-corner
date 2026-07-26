@@ -4,8 +4,9 @@
  * Greedy heuristic, one move per call (the UI paces the turn):
  *  - Draw when the engine says that's the move.
  *  - Prefer whole-pile moves — every legal pile move frees up a foundation
- *    slot (only foundations can move; corner piles sit on Kings and never
- *    budge). Among them, slide onto a corner first, biggest pile first.
+ *    slot (only foundations can move; corner piles never budge). Claim an
+ *    empty corner first, then slide onto an occupied corner, biggest pile
+ *    first.
  *  - Then shed from the hand: Kings to open corners, then whatever fits an
  *    existing pile (lowest rank first — low cards are the hard ones to
  *    place later), then fill an emptied foundation with the highest card.
@@ -29,7 +30,10 @@ export function chooseMove(state) {
     let best = pileMoves[0];
     let bestScore = -1;
     for (const move of pileMoves) {
-      const score = (CORNERS.includes(move.to) ? 100 : 0) + state.piles[move.from].length;
+      const cornerScore = CORNERS.includes(move.to)
+        ? (state.piles[move.to].length === 0 ? 200 : 100)
+        : 0;
+      const score = cornerScore + state.piles[move.from].length;
       if (score > bestScore) { bestScore = score; best = move; }
     }
     return best;

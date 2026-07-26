@@ -19,7 +19,8 @@ the phone across the table. Part of
 - A card plays on any pile if it's **one rank lower and the opposite
   color** of that pile's exposed card (Ace is low).
 - You can slide an **entire pile** onto another pile if the moved pile's
-  bottom card fits the target the same way.
+  bottom card fits the target the same way. A foundation pile based on a King
+  may move to an empty corner; corner piles never move.
 - An emptied cross-street can be restarted with **any** card from your hand.
 - First player to shed every card **wins immediately**, mid-turn.
 - Stock runs out? Play continues without drawing. If the stock is out and a
