@@ -9,6 +9,7 @@ import {
   PILES, CORNERS,
 } from './engine.js';
 import { chooseMove } from './bot.js';
+import { OnlineMatch, savedSession, clearSession, getName } from './rooms.js';
 
 const SAVE_KEY = 'kings-corner-save-v1';
 const BOT = 1; // in bot mode, player 0 is the human, player 1 is the Mayor
@@ -30,11 +31,23 @@ const $ = (id) => document.getElementById(id);
 const screens = { menu: $('menu'), handoff: $('handoff'), game: $('game'), gameover: $('gameover') };
 const cellEls = {};
 document.querySelectorAll('#park .cell[data-pile]').forEach((el) => { cellEls[el.dataset.pile] = el; });
+const onlinePanel = $('onlinePanel');
+const opTitle = $('opTitle');
+const opName = $('opName');
+const opCodeWrap = $('opCodeWrap');
+const opCode = $('opCode');
+const opError = $('opError');
+const lobbyEl = $('lobby');
+const lobbyCode = $('lobbyCode');
+const rejoinBtn = $('rejoinBtn');
 
-let G = null;             // { mode: 'bot' | 'pass', state }
+let G = null;             // { mode: 'bot' | 'pass' | 'online', state }
 let sel = null;           // { kind: 'card', card } | { kind: 'pile', id } | null
 let handRevealed = true;  // pass & play: false until the handoff button is tapped
 let botTimer = null;
+let gameOverTimer = null;
+let online = null;        // { match, myPlayer } while seated at an online table
+let onlineBusy = false;   // one rooms-layer push at a time
 
 /* ---------------------------------------------------------------- helpers */
 
@@ -43,15 +56,25 @@ const rankChar = (card) => RANK_CHAR[rankOf(card)] || rankOf(card);
 const suitSpan = (card) =>
   `<span class="${isRed(card) ? 'red' : ''}">${SUIT_CHAR[suitOf(card)]}</span>`;
 const cardHtml = (card) => `${rankChar(card)}${suitSpan(card)}`;
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 function playerName(p) {
   if (G.mode === 'bot') return p === BOT ? 'The Mayor' : 'You';
+  if (G.mode === 'online') {
+    if (p === online.myPlayer) return 'You';
+    return online.match.opponents().find((opp) => opp.seat === p)?.name || 'Your neighbor';
+  }
   return 'Player ' + (p + 1);
 }
 
 function humanTurn() {
-  return G && getStatus(G.state).status === 'active' &&
-    !(G.mode === 'bot' && G.state.currentPlayer === BOT);
+  if (!G || getStatus(G.state).status !== 'active') return false;
+  if (G.mode === 'bot') return G.state.currentPlayer !== BOT;
+  if (G.mode === 'online') {
+    return !onlineBusy && online.match.status === 'playing' &&
+      G.state.currentPlayer === online.myPlayer;
+  }
+  return true;
 }
 
 function show(name) {
@@ -60,6 +83,7 @@ function show(name) {
 
 function save() {
   try {
+    if (G?.mode === 'online') return;
     if (G && getStatus(G.state).status === 'active') {
       localStorage.setItem(SAVE_KEY, JSON.stringify(G));
     } else {
@@ -128,11 +152,19 @@ function render(fx = {}) {
   opps.innerHTML = '';
   for (let p = 0; p < state.numPlayers; p++) {
     if (G.mode === 'bot' && p !== BOT) continue; // your own hand is on the table
+    if (G.mode === 'online' && p === online.myPlayer) continue;
     const chip = document.createElement('div');
     chip.className = 'opp' + (state.currentPlayer === p ? ' active' : '');
-    chip.innerHTML =
-      `<span>${G.mode === 'bot' ? '🎩 The Mayor' : 'P' + (p + 1)}</span>` +
-      `<span class="opp-count">${state.hands[p].length}</span>`;
+    const name = document.createElement('span');
+    name.textContent = G.mode === 'bot'
+      ? '🎩 The Mayor'
+      : G.mode === 'online'
+        ? online.match.opponents().find((opp) => opp.seat === p)?.name || 'Your neighbor'
+        : 'P' + (p + 1);
+    const count = document.createElement('span');
+    count.className = 'opp-count';
+    count.textContent = state.hands[p].length;
+    chip.append(name, count);
     opps.appendChild(chip);
   }
 
@@ -179,9 +211,11 @@ function render(fx = {}) {
   endBtn.classList.toggle('hidden', !(myTurn && !mustDraw));
   endBtn.classList.toggle('urge', myTurn && onlyEndTurn);
 
-  // hand — in bot mode always the human's; in pass mode the current player's
-  const handOwner = G.mode === 'bot' ? 0 : state.currentPlayer;
-  $('handLabel').textContent = G.mode === 'bot'
+  // Online state contains both hands for syncing, but this honest UI renders
+  // only this phone's seat. The opponent gets a count in the top bar.
+  const handOwner = G.mode === 'bot' ? 0
+    : G.mode === 'online' ? online.myPlayer : state.currentPlayer;
+  $('handLabel').textContent = G.mode === 'bot' || G.mode === 'online'
     ? 'your hand'
     : playerName(handOwner) + "'s hand";
   const handEl = $('hand');
@@ -243,7 +277,7 @@ function renderMessage(moves, myTurn, mustDraw, onlyEndTurn) {
   const lines = [];
 
   if (last && !(myTurn && mustDraw)) {
-    const who = playerName(last.player);
+    const who = esc(playerName(last.player));
     if (last.type === 'play') {
       lines.push(`${who} played ${cardHtml(last.card)} on ${PILE_NAME[last.to]}.`);
     } else if (last.type === 'move') {
@@ -268,7 +302,14 @@ function renderMessage(moves, myTurn, mustDraw, onlyEndTurn) {
       lines.push('Play down the streets, slide whole piles — Kings take the corners.');
     }
   } else if (lines.length === 0) {
-    lines.push('The Mayor is deliberating…');
+    if (G.mode === 'online') {
+      const opp = online.match.opponents()[0] || {};
+      lines.push(opp.away
+        ? `${esc(opp.name || 'Your neighbor')} stepped away from the table…`
+        : `Waiting on ${esc(opp.name || 'your neighbor')}…`);
+    } else {
+      lines.push('The Mayor is deliberating…');
+    }
   }
   $('msg').innerHTML = lines.join(' ');
 }
@@ -288,7 +329,8 @@ function doMove(move) {
     };
   }
   G.state = applyMove(G.state, move);
-  save();
+  if (G.mode === 'online') onlineBusy = true;
+  else save();
 
   // Pass & play: the instant the turn changes hands, stop showing cards —
   // otherwise the next player's hand flashes on screen before the handoff.
@@ -298,19 +340,41 @@ function doMove(move) {
   if (move.type === 'draw') { fx.stockBump = true; fx.drew = true; }
   render(fx);
 
-  const status = getStatus(G.state);
-  if (status.status !== 'active') {
-    setTimeout(() => showGameOver(status), move.type === 'play' ? 900 : 500);
-    return;
-  }
-
-  const next = G.state.currentPlayer;
-  if (next !== mover) {
-    if (G.mode === 'bot' && next === BOT) {
-      botTimer = setTimeout(botStep, 850);
-    } else if (G.mode === 'pass') {
-      setTimeout(() => showHandoff(next), 550);
+  const finishMove = () => {
+    const status = getStatus(G.state);
+    if (status.status !== 'active') {
+      clearTimeout(gameOverTimer);
+      const activeGame = G;
+      gameOverTimer = setTimeout(() => {
+        if (G === activeGame && getStatus(G.state).status !== 'active') showGameOver(status);
+      }, move.type === 'play' ? 900 : 500);
+      return;
     }
+
+    const next = G.state.currentPlayer;
+    if (next !== mover) {
+      if (G.mode === 'bot' && next === BOT) {
+        botTimer = setTimeout(botStep, 850);
+      } else if (G.mode === 'pass') {
+        setTimeout(() => showHandoff(next), 550);
+      }
+    }
+  };
+
+  if (G.mode === 'online') {
+    const activeMatch = online.match;
+    pushOnline().then((accepted) => {
+      if (!online || online.match !== activeMatch || !G) return;
+      onlineBusy = false;
+      if (!accepted) {
+        if (getStatus(G.state).status === 'active') render();
+        return;
+      }
+      finishMove();
+      if (getStatus(G.state).status === 'active') render();
+    });
+  } else {
+    finishMove();
   }
 }
 
@@ -426,8 +490,12 @@ function botStep() {
 
 function startGame(mode) {
   clearTimeout(botTimer);
+  clearTimeout(gameOverTimer);
   sel = null;
+  online = null;
+  onlineBusy = false;
   G = { mode, state: createInitialState({ numPlayers: 2, seed: newSeed() }) };
+  $('againBtn').classList.remove('hidden');
   save();
   if (mode === 'pass') {
     showHandoff(G.state.currentPlayer);
@@ -477,6 +545,12 @@ function showGameOver(status) {
   } else if (G.mode === 'bot') {
     title.textContent = 'YOU WIN! 👑';
     line.textContent = pick + ' The Mayor tips his hat to you.';
+  } else if (G.mode === 'online') {
+    const iWon = status.winner === online.myPlayer;
+    title.textContent = iWon ? 'YOU WIN! 👑' : `${playerName(status.winner).toUpperCase()} WINS! 👑`;
+    line.textContent = iWon
+      ? pick + ' Your neighbor tips their hat.'
+      : 'The park table has a new monarch. Call for another deal.';
   } else {
     title.textContent = playerName(status.winner).toUpperCase() + ' WINS! 👑';
     line.textContent = pick;
@@ -507,15 +581,322 @@ $('resumeBtn').addEventListener('click', () => {
 
 function goMenu() {
   clearTimeout(botTimer);
+  clearTimeout(gameOverTimer);
   sel = null;
+  if (online) {
+    online.match.leave();
+    online = null;
+    onlineBusy = false;
+    G = null;
+  }
+  $('homeBtn').dataset.armed = '';
+  $('homeBtn').textContent = '🏠';
   $('resumeBtn').classList.toggle('hidden', !loadSave());
   show('menu');
+  refreshRejoin();
 }
 
-$('homeBtn').addEventListener('click', goMenu);
+$('homeBtn').addEventListener('click', () => {
+  if (online && $('homeBtn').dataset.armed !== '1') {
+    $('homeBtn').dataset.armed = '1';
+    $('homeBtn').textContent = 'LEAVE?';
+    setTimeout(() => {
+      $('homeBtn').dataset.armed = '';
+      $('homeBtn').textContent = '🏠';
+    }, 2500);
+    return;
+  }
+  goMenu();
+});
 $('menuBtn').addEventListener('click', goMenu);
-$('againBtn').addEventListener('click', () => startGame(G.mode));
+$('againBtn').addEventListener('click', () => {
+  if (G.mode === 'online') onlineRematch();
+  else startGame(G.mode);
+});
+
+/* ------------------------------------------------------------- online play */
+// Two phones share the engine's complete JSON state through js/rooms.js.
+// Seat 0 hosts and is the player createInitialState() makes first. Remote
+// states repaint cold: pile-slide diffs are ambiguous, while a full render
+// safely handles multi-play turns, conflict truth, resume, and rematches.
+
+const GAME = 'kings-corner';
+let panelIntent = 'host';
+let pollErrors = 0;
+
+$('hostBtn').addEventListener('click', () => openPanel('host'));
+$('joinBtn').addEventListener('click', () => openPanel('join'));
+$('opCancel').addEventListener('click', closePanel);
+$('opGo').addEventListener('click', onlineGo);
+$('lobbyCancel').addEventListener('click', cancelLobby);
+rejoinBtn.addEventListener('click', rejoinTable);
+opCode.addEventListener('input', () => {
+  opCode.value = opCode.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+});
+[opName, opCode].forEach((el) => el.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') onlineGo();
+}));
+
+function openPanel(intent) {
+  panelIntent = intent;
+  opTitle.textContent = intent === 'host' ? 'OPEN A TABLE' : 'JOIN A TABLE';
+  $('opGo').textContent = intent === 'host' ? 'GET A CODE' : 'TAKE A SEAT';
+  opCodeWrap.classList.toggle('hidden', intent === 'host');
+  opError.classList.add('hidden');
+  opName.value = opName.value || getName();
+  onlinePanel.classList.remove('hidden');
+  (intent === 'join' && opName.value ? opCode : opName).focus();
+}
+
+function closePanel() {
+  onlinePanel.classList.add('hidden');
+}
+
+const FRIENDLY_ERRORS = {
+  not_found: 'No table with that code — check the letters.',
+  room_full: 'That park table already has two players.',
+  room_started: 'That deal is already underway.',
+  not_ready: "Online play isn't switched on yet — check back soon!",
+  offline: "Can't reach the park — are you online?",
+};
+
+function friendly(err) {
+  if (err?.code === 'wrong_game') {
+    return `That code is for ${String(err.detail || 'another game').replace(/-/g, ' ')} — head there to use it.`;
+  }
+  return FRIENDLY_ERRORS[err?.code] || 'The cards blew off the table — please try again.';
+}
+
+async function onlineGo() {
+  const name = opName.value.trim();
+  if (!name) {
+    opError.textContent = 'Put a name on your seat.';
+    opError.classList.remove('hidden');
+    opName.focus();
+    return;
+  }
+
+  const go = $('opGo');
+  go.disabled = true;
+  opError.classList.add('hidden');
+  try {
+    if (panelIntent === 'host') {
+      const match = await OnlineMatch.create({
+        game: GAME,
+        name,
+        state: createInitialState({ numPlayers: 2, seed: newSeed() }),
+        seats: 2,
+      });
+      closePanel();
+      openLobby(match);
+    } else {
+      const code = opCode.value.trim();
+      if (code.length !== 4) {
+        opError.textContent = 'The park code is 4 letters.';
+        opError.classList.remove('hidden');
+        opCode.focus();
+        return;
+      }
+      const match = await OnlineMatch.join({ game: GAME, code, name });
+      closePanel();
+      enterOnlineGame(match);
+    }
+  } catch (err) {
+    opError.textContent = friendly(err);
+    opError.classList.remove('hidden');
+  } finally {
+    go.disabled = false;
+  }
+}
+
+function openLobby(match) {
+  lobbyCode.textContent = match.code;
+  lobbyEl.classList.remove('hidden');
+  match.start({
+    onStatus: (status) => {
+      if (status === 'playing') {
+        lobbyEl.classList.add('hidden');
+        enterOnlineGame(match);
+      }
+    },
+    onError: () => {},
+  });
+  lobbyEl._match = match;
+}
+
+function cancelLobby() {
+  const match = lobbyEl._match;
+  if (match) match.leave();
+  lobbyEl._match = null;
+  lobbyEl.classList.add('hidden');
+  refreshRejoin();
+}
+
+async function rejoinTable() {
+  rejoinBtn.disabled = true;
+  try {
+    const match = await OnlineMatch.resume({ game: GAME });
+    if (match.status === 'waiting') openLobby(match);
+    else enterOnlineGame(match);
+  } catch {
+    clearSession(GAME);
+    refreshRejoin();
+  } finally {
+    rejoinBtn.disabled = false;
+  }
+}
+
+function refreshRejoin() {
+  const saved = savedSession(GAME);
+  rejoinBtn.classList.toggle('hidden', !saved);
+  if (saved) rejoinBtn.textContent = `↩ REJOIN PARK TABLE (${saved.code})`;
+}
+
+function enterOnlineGame(match) {
+  clearTimeout(botTimer);
+  clearTimeout(gameOverTimer);
+  online = { match, myPlayer: match.seat };
+  onlineBusy = false;
+  pollErrors = 0;
+  sel = null;
+  handRevealed = true;
+  G = { mode: 'online', state: match.state };
+  $('againBtn').classList.remove('hidden');
+  show('game');
+  render({ dealAll: true });
+  match.start({
+    onState: onRemoteState,
+    onStatus: onRemoteStatus,
+    onPresence: onRemotePresence,
+    onError: onPollError,
+  });
+  if (match.status === 'over' && getStatus(G.state).status === 'active') {
+    onRemoteStatus('over');
+  }
+}
+
+function onRemoteState(newState) {
+  if (!online) return;
+  clearTimeout(gameOverTimer);
+  G.state = newState;
+  sel = null;
+  onlineBusy = false;
+  const status = getStatus(G.state);
+  if (status.status === 'active') {
+    $('againBtn').classList.remove('hidden');
+    show('game');
+    render();
+  } else {
+    render();
+    showGameOver(status);
+  }
+}
+
+function onRemoteStatus(status) {
+  if (status !== 'over' || !online || getStatus(G.state).status !== 'active') return;
+  const opp = online.match.opponents()[0];
+  if (!opp?.left) return;
+  $('go-title').textContent = `${(opp.name || 'Your neighbor').toUpperCase()} LEFT THE PARK`;
+  $('go-line').textContent = 'The table is packed up for now.';
+  $('againBtn').classList.add('hidden');
+  show('gameover');
+}
+
+function onRemotePresence(opponents) {
+  const opp = opponents[0];
+  pollErrors = 0;
+  if (opp?.left) $('againBtn').classList.add('hidden');
+  if (!onlineBusy && screens.game.classList.contains('hidden') === false) {
+    render();
+  }
+}
+
+function onPollError(err) {
+  if (!online) return;
+  if (err?.code === 'not_found') {
+    online.match.stop();
+    clearSession(GAME);
+    online = null;
+    onlineBusy = false;
+    G = null;
+    show('menu');
+    refreshRejoin();
+    return;
+  }
+  pollErrors++;
+  if (pollErrors >= 3 && G && getStatus(G.state).status === 'active') {
+    $('msg').textContent = 'The connection is stuck at Main & St. Paul — hang tight…';
+  }
+}
+
+async function pushOnline() {
+  const match = online.match;
+  const proposed = G.state;
+  const over = getStatus(proposed).status !== 'active';
+  try {
+    await match.push(proposed, { over });
+    pollErrors = 0;
+    return true;
+  } catch (err) {
+    if (!online || online.match !== match || !G) return false;
+    if (err?.code === 'version_conflict') {
+      G.state = match.state;
+      sel = null;
+      render();
+      return false;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    if (!online || online.match !== match || !G || G.state !== proposed) return false;
+    try {
+      await match.push(proposed, { over });
+      pollErrors = 0;
+      return true;
+    } catch (retryErr) {
+      if (retryErr?.code !== 'version_conflict') onPollError(retryErr);
+      if (!online || online.match !== match || !G) return false;
+      G.state = match.state;
+      sel = null;
+      render();
+      return false;
+    }
+  }
+}
+
+async function onlineRematch() {
+  if (!online || onlineBusy) return;
+  const match = online.match;
+  clearTimeout(gameOverTimer);
+  const fresh = createInitialState({ numPlayers: 2, seed: newSeed() });
+  G.state = fresh;
+  sel = null;
+  onlineBusy = true;
+  show('game');
+  render({ dealAll: true });
+  try {
+    await match.push(fresh);
+    pollErrors = 0;
+  } catch (err) {
+    if (!online || online.match !== match || !G) return;
+    if (err?.code === 'version_conflict') {
+      G.state = match.state;
+    } else {
+      onPollError(err);
+      G.state = match.state;
+    }
+  } finally {
+    if (!online || online.match !== match || !G) return;
+    onlineBusy = false;
+    const status = getStatus(G.state);
+    if (status.status === 'active') {
+      show('game');
+      render();
+    } else {
+      showGameOver(status);
+    }
+  }
+}
 
 /* ---------------------------------------------------------------- boot */
 
 goMenu();
+refreshRejoin();

@@ -36,6 +36,18 @@
       <button id="resumeBtn" class="big-btn hidden">↩&nbsp; BACK TO THE PARK</button>
       <button id="botBtn" class="big-btn">🎩&nbsp; TAKE ON THE MAYOR</button>
       <button id="passBtn" class="mode-btn">📱 PASS &amp; PLAY (2 PLAYERS)</button>
+      <div class="online-label">or deal across town — two phones</div>
+      <div id="onlineRow">
+        <button id="hostBtn" class="mode-btn">
+          <span class="online-name">🌳 OPEN A TABLE</span>
+          <span class="online-blurb">get a park code</span>
+        </button>
+        <button id="joinBtn" class="mode-btn">
+          <span class="online-name">🔑 JOIN A TABLE</span>
+          <span class="online-blurb">bring their code</span>
+        </button>
+      </div>
+      <button id="rejoinBtn" class="chip-btn hidden"></button>
 
       <div id="howto">
         <div class="howto-line"><span class="key">DRAW ONE</span> tap the stack to start your turn</div>
@@ -43,6 +55,35 @@
         <div class="howto-line"><span class="key">KINGS ONLY</span> in the four park corners</div>
       </div>
     </div>
+
+    <!-- Online setup: name (+ code when joining) -->
+    <div id="onlinePanel" class="overlay hidden">
+      <div class="op-card">
+        <div id="opTitle" class="op-title">OPEN A TABLE</div>
+        <label class="op-label" for="opName">YOUR NAME</label>
+        <input id="opName" maxlength="24" autocomplete="nickname" placeholder="Neighbor">
+        <div id="opCodeWrap" class="hidden">
+          <label class="op-label" for="opCode">PARK CODE</label>
+          <input id="opCode" maxlength="4" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="ABCD">
+        </div>
+        <div id="opError" class="op-error hidden"></div>
+        <div class="op-btns">
+          <button id="opCancel" class="chip-btn">BACK</button>
+          <button id="opGo" class="big-btn">GET A CODE</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Lobby: show the park code while we wait for the friend -->
+    <div id="lobby" class="overlay hidden">
+      <div class="op-card">
+        <div class="op-title">CALL OUT THIS PARK CODE</div>
+        <div id="lobbyCode"></div>
+        <div id="lobbyHint">they open Kings Corner, tap <b>JOIN A TABLE</b>, and type it in</div>
+        <div class="op-btns"><button id="lobbyCancel" class="chip-btn">PACK UP</button></div>
+      </div>
+    </div>
+
     <footer id="credit">
       A Btown Games production · <a href="https://play.btownbrief.com/" target="_blank" rel="noopener">More games →</a>
       · <a href="https://www.btownbrief.com" target="_blank" rel="noopener">Read the BTown Brief →</a>

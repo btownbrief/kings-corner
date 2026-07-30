@@ -793,3 +793,141 @@ html, body {
   :root { --card-w: 84px; }
   #hand { justify-content: center; }
 }
+
+/* ------------------------------------------------------------ online play */
+
+.online-label {
+  margin-bottom: -1.6vh;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--cream-dim);
+  text-shadow: 0 1px 3px rgba(18, 53, 36, 0.9);
+}
+#onlineRow {
+  display: flex;
+  gap: 9px;
+  width: min(100%, 390px);
+  margin-bottom: -1.2vh;
+}
+#onlineRow .mode-btn {
+  flex: 1;
+  padding: 10px 8px;
+}
+.online-name,
+.online-blurb {
+  display: block;
+}
+.online-name {
+  font-size: 12px;
+  font-weight: 900;
+}
+.online-blurb {
+  margin-top: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--cream-dim);
+}
+#rejoinBtn {
+  margin-top: -1vh;
+  padding: 8px 13px;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(6, 18, 12, 0.76);
+  backdrop-filter: blur(3px);
+}
+.op-card {
+  width: min(92vw, 340px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 20px 18px;
+  background: linear-gradient(180deg, var(--pine-2), var(--pine));
+  border: 2.5px solid rgba(246, 239, 220, 0.28);
+  border-radius: 20px;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55);
+  color: var(--cream);
+  text-align: center;
+}
+.op-title {
+  font-size: 16px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+.op-label {
+  margin-bottom: -6px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: var(--cream-dim);
+  text-align: left;
+}
+.op-card input {
+  width: 100%;
+  padding: 12px;
+  border: 2px solid rgba(246, 239, 220, 0.3);
+  border-radius: 12px;
+  outline: none;
+  background: rgba(6, 18, 12, 0.58);
+  color: var(--cream);
+  font-size: 18px;
+  font-weight: 700;
+  text-align: center;
+  user-select: text;
+}
+.op-card input:focus { border-color: var(--sun); }
+#opCode {
+  font-size: 24px;
+  letter-spacing: 0.4em;
+  text-transform: uppercase;
+}
+.op-error {
+  color: #ffb09c;
+  font-size: 13px;
+  font-weight: 700;
+}
+.op-btns {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  margin-top: 4px;
+}
+.op-btns .big-btn {
+  padding: 12px 20px;
+  font-size: 15px;
+}
+#lobbyCode {
+  padding: 6px 0;
+  color: var(--sun);
+  font-size: 44px;
+  font-weight: 900;
+  letter-spacing: 0.35em;
+  text-indent: 0.35em;
+  text-shadow: 0 3px 0 rgba(0, 0, 0, 0.4);
+  animation: lobby-pulse 1.6s ease-in-out infinite;
+}
+@keyframes lobby-pulse {
+  50% { opacity: 0.75; }
+}
+#lobbyHint {
+  color: var(--cream-dim);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+@media (max-height: 700px) {
+  #menu .menu-inner { gap: 1.5vh; }
+  #onlineRow { margin-bottom: -0.5vh; }
+  #howto { gap: 4px; }
+}
