@@ -10,8 +10,10 @@ import {
 } from './engine.js';
 import { chooseMove } from './bot.js';
 import { OnlineMatch, savedSession, clearSession, getName } from './rooms.js';
+import { sound } from './audio.js';
 
 const SAVE_KEY = 'kings-corner-save-v1';
+const COACH_KEY = 'kings-corner-coach-v1';
 const BOT = 1; // in bot mode, player 0 is the human, player 1 is the Mayor
 
 const SUIT_CHAR = { S: '♠', H: '♥', D: '♦', C: '♣' };
@@ -42,6 +44,9 @@ const lobbyEl = $('lobby');
 const lobbyCode = $('lobbyCode');
 const lobbyNames = $('lobbyNames');
 const rejoinBtn = $('rejoinBtn');
+const fxBanner = $('fxBanner');
+const fxStatus = $('fxStatus');
+const coachEl = $('coach');
 
 let G = null;             // { mode: 'bot' | 'pass' | 'online', state }
 let sel = null;           // { kind: 'card', card } | { kind: 'pile', id } | null
@@ -50,6 +55,11 @@ let botTimer = null;
 let gameOverTimer = null;
 let online = null;        // { match, myPlayer } while seated at an online table
 let onlineBusy = false;   // one rooms-layer push at a time
+let confirmedState = null; // last state accepted locally or by the rooms layer
+let confirmedKey = '';
+let effectRun = 0;
+let effectTimers = [];
+let resolutionKey = '';
 
 /* ---------------------------------------------------------------- helpers */
 
@@ -104,6 +114,227 @@ function loadSave() {
   return null;
 }
 
+/* ------------------------------------------------------- sound + effects */
+
+function stateKey(state) {
+  return state ? JSON.stringify(state) : '';
+}
+
+function setConfirmedStateCold(state) {
+  confirmedState = state;
+  confirmedKey = stateKey(state);
+}
+
+function reducedMotion() {
+  return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+}
+
+function later(fn, delay) {
+  const run = effectRun;
+  const timer = setTimeout(() => {
+    effectTimers = effectTimers.filter((candidate) => candidate !== timer);
+    if (run === effectRun) fn();
+  }, delay);
+  effectTimers.push(timer);
+}
+
+function clearPresentation() {
+  effectRun++;
+  effectTimers.forEach(clearTimeout);
+  effectTimers = [];
+  clearTimeout(flashBanner.timer);
+  flashBanner.timer = null;
+  fxBanner.className = 'hidden';
+  fxBanner.textContent = '';
+  fxStatus.textContent = '';
+  document.querySelectorAll('.corner-spark, .sweep-card').forEach((el) => el.remove());
+  document.querySelectorAll('.corner-claimed, .one-card').forEach((el) => {
+    el.classList.remove('corner-claimed', 'one-card');
+  });
+  screens.gameover.classList.remove('resolving');
+  coachEl.classList.add('hidden');
+}
+
+function flashBanner(text) {
+  fxBanner.textContent = text;
+  fxStatus.textContent = text;
+  fxBanner.className = 'show';
+  // Restart and coalesce: a new moment replaces the old banner.
+  fxBanner.style.animation = 'none';
+  void fxBanner.offsetWidth;
+  fxBanner.style.animation = '';
+  clearTimeout(flashBanner.timer);
+  const run = effectRun;
+  flashBanner.timer = setTimeout(() => {
+    if (run !== effectRun) return;
+    fxBanner.className = 'hidden';
+  }, 1350);
+}
+
+function burstCorner(id) {
+  const cell = cellEls[id];
+  if (!cell) return;
+  cell.classList.remove('corner-claimed');
+  void cell.offsetWidth;
+  cell.classList.add('corner-claimed');
+  later(() => cell.classList.remove('corner-claimed'), 800);
+  if (reducedMotion()) return;
+
+  // Eighteen deterministic sparks keep the total well below the 40-node cap.
+  document.querySelectorAll('.corner-spark').forEach((el) => el.remove());
+  for (let i = 0; i < 18; i++) {
+    const spark = document.createElement('i');
+    spark.className = 'corner-spark';
+    spark.style.setProperty('--angle', `${i * 20}deg`);
+    spark.style.setProperty('--distance', `${38 + (i % 4) * 8}px`);
+    cell.appendChild(spark);
+  }
+  later(() => cell.querySelectorAll('.corner-spark').forEach((el) => el.remove()), 850);
+}
+
+function pulseOneCard(player) {
+  const chip = document.querySelector(`.opp[data-player="${player}"]`);
+  const target = chip || ((G.mode === 'bot' && player === 0) ||
+    (G.mode === 'online' && player === online.myPlayer) ? $('handLabel') : null);
+  if (!target) return;
+  target.classList.remove('one-card');
+  void target.offsetWidth;
+  target.classList.add('one-card');
+  later(() => target.classList.remove('one-card'), 1500);
+}
+
+function analyzeTransition(before, after, knownMove) {
+  if (!before || !after) return null;
+  const action = after.lastAction;
+  if (!action || (knownMove && (
+    knownMove.type !== action.type ||
+    knownMove.card !== action.card ||
+    knownMove.from !== action.from ||
+    knownMove.to !== action.to
+  ))) return null;
+  const player = action.player;
+  if (!Number.isInteger(player) || !before.hands[player] || !after.hands[player]) return null;
+
+  if (action.type === 'draw') {
+    if (before.stock.length !== after.stock.length + 1 ||
+        after.hands[player].length !== before.hands[player].length + 1) return null;
+  } else if (action.type === 'play') {
+    if (!before.hands[player].includes(action.card) ||
+        after.hands[player].length !== before.hands[player].length - 1 ||
+        after.piles[action.to]?.length !== before.piles[action.to]?.length + 1 ||
+        exposedCard(after.piles[action.to]) !== action.card) return null;
+  } else if (action.type === 'move') {
+    if (!before.piles[action.from]?.length ||
+        after.piles[action.from]?.length !== 0 ||
+        after.piles[action.to]?.length !== before.piles[action.to]?.length + action.count) return null;
+  } else if (action.type !== 'endTurn') {
+    return null;
+  }
+
+  const oneCardPlayers = [];
+  before.hands.forEach((hand, p) => {
+    if (hand.length > 1 && after.hands[p].length === 1) oneCardPlayers.push(p);
+  });
+  const corner = (action.type === 'play' || action.type === 'move') &&
+    CORNERS.includes(action.to) && before.piles[action.to].length === 0;
+  return { action, oneCardPlayers, corner };
+}
+
+function visualFxFor(transition) {
+  if (!transition) return {};
+  const { action } = transition;
+  if (action.type === 'play') return { playedTo: action.to };
+  if (action.type === 'draw') return { stockBump: true, drew: true };
+  if (action.type === 'move') {
+    return {
+      slide: {
+        from: action.from,
+        to: action.to,
+        count: action.count,
+        fromRect: cellEls[action.from].querySelector('.pilecards').getBoundingClientRect(),
+      },
+    };
+  }
+  return {};
+}
+
+function fireTransitionEffects(transition) {
+  if (!transition) return;
+  const { action, oneCardPlayers, corner } = transition;
+  oneCardPlayers.forEach(pulseOneCard);
+
+  if (corner) {
+    burstCorner(action.to);
+    sound.corner();
+  } else if (action.type === 'play') {
+    sound.slap();
+  } else if (action.type === 'move') {
+    sound.slide();
+  } else if (action.type === 'draw') {
+    sound.draw();
+  }
+
+  if (corner || oneCardPlayers.length) {
+    const parts = [];
+    if (corner) parts.push('👑 CORNER CLAIMED');
+    if (oneCardPlayers.length) parts.push('🍁 ONE CARD!');
+    flashBanner(parts.join(' · '));
+  }
+}
+
+/* Accept one genuinely new transition. Cold starts and hydration instead use
+ * setConfirmedStateCold(), so reconnect/rerender never replays effects. */
+function acceptConfirmedState(next, knownMove = null) {
+  const key = stateKey(next);
+  if (key === confirmedKey) {
+    render();
+    return false;
+  }
+  const transition = analyzeTransition(confirmedState, next, knownMove);
+  confirmedState = next;
+  confirmedKey = key;
+  const canPresent = handRevealed && !screens.game.classList.contains('hidden');
+  render(canPresent ? visualFxFor(transition) : {});
+  if (canPresent) fireTransitionEffects(transition);
+  return true;
+}
+
+function coachWasDismissed() {
+  try {
+    return localStorage.getItem(COACH_KEY) === '1';
+  } catch (e) {
+    return false;
+  }
+}
+
+function maybeShowCoach() {
+  if (!coachWasDismissed()) coachEl.classList.remove('hidden');
+}
+
+function dismissCoach() {
+  if (coachEl.classList.contains('hidden')) return;
+  coachEl.classList.add('hidden');
+  try {
+    localStorage.setItem(COACH_KEY, '1');
+  } catch (e) { /* the coach can return next visit if storage is unavailable */ }
+}
+
+function updateMuteButton() {
+  $('mute').textContent = sound.muted ? '🔇' : '🔊';
+  $('mute').setAttribute('aria-label', sound.muted ? 'Turn sound on' : 'Mute sound');
+  $('mute').setAttribute('aria-pressed', String(sound.muted));
+}
+
+$('mute').addEventListener('click', () => {
+  sound.toggleMuted();
+  updateMuteButton();
+});
+$('game').addEventListener('pointerdown', dismissCoach, true);
+$('game').addEventListener('keydown', dismissCoach, true);
+document.addEventListener('pointerdown', sound.unlock, { once: true, capture: true });
+document.addEventListener('keydown', sound.unlock, { once: true, capture: true });
+updateMuteButton();
+
 /* ---------------------------------------------------------------- cards */
 
 function cardEl(card) {
@@ -157,6 +388,7 @@ function render(fx = {}) {
     if (G.mode === 'online' && p === online.myPlayer) continue;
     const chip = document.createElement('div');
     chip.className = 'opp' + (state.currentPlayer === p ? ' active' : '');
+    chip.dataset.player = p;
     const name = document.createElement('span');
     name.textContent = G.mode === 'bot'
       ? '🎩 The Mayor'
@@ -321,16 +553,6 @@ function renderMessage(moves, myTurn, mustDraw, onlyEndTurn) {
 
 function doMove(move) {
   const mover = G.state.currentPlayer;
-  const fx = {};
-  if (move.type === 'move') {
-    // capture where the pile is leaving from, for the slide animation
-    fx.slide = {
-      from: move.from,
-      to: move.to,
-      count: G.state.piles[move.from].length,
-      fromRect: cellEls[move.from].querySelector('.pilecards').getBoundingClientRect(),
-    };
-  }
   G.state = applyMove(G.state, move);
   if (G.mode === 'online') onlineBusy = true;
   else save();
@@ -339,9 +561,10 @@ function doMove(move) {
   // otherwise the next player's hand flashes on screen before the handoff.
   if (G.mode === 'pass' && G.state.currentPlayer !== mover) handRevealed = false;
 
-  if (move.type === 'play') fx.playedTo = move.to;
-  if (move.type === 'draw') { fx.stockBump = true; fx.drew = true; }
-  render(fx);
+  // Room moves remain visually optimistic, but all sound/juice waits until
+  // the rooms layer confirms the version. Offline moves are confirmed now.
+  if (G.mode === 'online') render();
+  else acceptConfirmedState(G.state, move);
 
   const finishMove = () => {
     const status = getStatus(G.state);
@@ -359,7 +582,7 @@ function doMove(move) {
       if (G.mode === 'bot' && next === BOT) {
         botTimer = setTimeout(botStep, 850);
       } else if (G.mode === 'pass') {
-        setTimeout(() => showHandoff(next), 550);
+        later(() => showHandoff(next), 550);
       }
     }
   };
@@ -373,8 +596,8 @@ function doMove(move) {
         if (getStatus(G.state).status === 'active') render();
         return;
       }
+      acceptConfirmedState(G.state, move);
       finishMove();
-      if (getStatus(G.state).status === 'active') render();
     });
   } else {
     finishMove();
@@ -392,12 +615,14 @@ function onCardTap(card, el) {
   const moves = legalMoves(G.state);
   if (moves.length === 1 && moves[0].type === 'draw') {
     $('msg').innerHTML = 'Draw first — tap the stack.';
+    sound.nope();
     return;
   }
   if (sel?.kind === 'card' && sel.card === card) { deselect(); return; }
   const targets = targetsFor(moves, { kind: 'card', card });
   if (targets.size === 0) {
     el.classList.remove('nope'); void el.offsetWidth; el.classList.add('nope');
+    sound.nope();
     return;
   }
   if (targets.size === 1) {
@@ -414,6 +639,7 @@ function onPileTap(id) {
   const moves = legalMoves(G.state);
   if (moves.length === 1 && moves[0].type === 'draw') {
     $('msg').innerHTML = 'Draw first — tap the stack.';
+    sound.nope();
     return;
   }
   if (sel?.kind === 'card') {
@@ -422,6 +648,7 @@ function onPileTap(id) {
       sel = null;
       doMove({ type: 'play', card, to: id });
     } else {
+      sound.nope();
       deselect();
     }
     return;
@@ -433,6 +660,7 @@ function onPileTap(id) {
       sel = null;
       doMove({ type: 'move', from, to: id });
     } else {
+      sound.nope();
       deselect();
     }
     return;
@@ -444,6 +672,7 @@ function onPileTap(id) {
   } else {
     const cell = cellEls[id];
     cell.classList.remove('nope'); void cell.offsetWidth; cell.classList.add('nope');
+    sound.nope();
   }
 }
 
@@ -459,6 +688,7 @@ $('stock').addEventListener('click', (e) => {
   $('msg').innerHTML = G.state.stock.length === 0
     ? 'The stack is spent — play what you hold.'
     : 'One draw per turn — play on, or end your turn.';
+  sound.nope();
 });
 $('stock').addEventListener('keydown', (e) => {
   if (e.key !== 'Enter' && e.key !== ' ') return;
@@ -494,10 +724,13 @@ function botStep() {
 function startGame(mode, numPlayers) {
   clearTimeout(botTimer);
   clearTimeout(gameOverTimer);
+  clearPresentation();
   sel = null;
   online = null;
   onlineBusy = false;
+  resolutionKey = '';
   G = { mode, state: createInitialState({ numPlayers, seed: newSeed() }) };
+  setConfirmedStateCold(G.state);
   $('againBtn').classList.remove('hidden');
   save();
   if (mode === 'pass') {
@@ -506,10 +739,12 @@ function startGame(mode, numPlayers) {
     handRevealed = true;
     show('game');
     render({ dealAll: true });
+    maybeShowCoach();
   }
 }
 
 function showHandoff(player) {
+  clearPresentation();
   handRevealed = false;
   sel = null;
   $('handoffTitle').textContent = 'Pass the phone to ' + playerName(player);
@@ -520,6 +755,7 @@ $('handoffBtn').addEventListener('click', () => {
   handRevealed = true;
   show('game');
   render({ dealAll: true });
+  maybeShowCoach();
 });
 
 const WIN_LINES = [
@@ -528,13 +764,82 @@ const WIN_LINES = [
   'Cleaner than Church Street at sunrise.',
   'That was smoother than a creemee in July.',
 ];
+const MAYOR_CONCEDES = [
+  '“Fair and square. I’ll put your crown on the council agenda.” — The Mayor',
+  '“The park is yours. My hat is officially tipped.” — The Mayor',
+  '“You ran those streets better than Public Works.” — The Mayor',
+];
+const MAYOR_WINS = [
+  '“City Hall keeps the crown tonight. Rematch paperwork is one tap.” — The Mayor',
+  '“A tidy little victory. I promise not to raise taxes over it.” — The Mayor',
+  '“The hat stays on. Come back and make me earn it again.” — The Mayor',
+];
+const MAYOR_TIES = [
+  '“A split decision. Very municipal.” — The Mayor',
+  '“We’ll call that bipartisan gridlock.” — The Mayor',
+];
+const usedMayorLines = new Set();
 
-function showGameOver(status) {
+function pickFresh(lines) {
+  let available = lines.filter((line) => !usedMayorLines.has(line));
+  if (available.length === 0) {
+    lines.forEach((line) => usedMayorLines.delete(line));
+    available = lines;
+  }
+  const pick = available[(Math.random() * available.length) | 0];
+  usedMayorLines.add(pick);
+  return pick;
+}
+
+function mayorReaction(status) {
+  if (G.mode !== 'bot') return '';
+  const winners = status.winners || [];
+  const humanWon = winners.includes(0);
+  const mayorWon = winners.includes(BOT);
+  if (humanWon && mayorWon) return pickFresh(MAYOR_TIES);
+  return humanWon ? pickFresh(MAYOR_CONCEDES) : pickFresh(MAYOR_WINS);
+}
+
+function localPlayerWon(status) {
+  if (G.mode === 'bot') return status.winners.includes(0);
+  if (G.mode === 'online') return status.winners.includes(online.myPlayer);
+  return true;
+}
+
+function animateResolution(won) {
+  screens.gameover.classList.add('resolving');
+  sound[won ? 'win' : 'lose']();
+  if (!reducedMotion()) {
+    const faces = ['K♠', 'Q♥', 'J♣', '10♦', 'A♠', 'K♥', '9♣', 'Q♦', 'J♠', 'A♥'];
+    faces.forEach((face, i) => {
+      const card = document.createElement('i');
+      card.className = 'sweep-card';
+      card.textContent = face;
+      card.style.setProperty('--top', `${12 + (i % 5) * 17}%`);
+      card.style.setProperty('--delay', `${i * 45}ms`);
+      if (face.includes('♥') || face.includes('♦')) card.style.setProperty('--ink', 'var(--card-red)');
+      screens.gameover.appendChild(card);
+    });
+    later(() => screens.gameover.querySelectorAll('.sweep-card').forEach((el) => el.remove()), 1750);
+  }
+  later(() => {
+    const focusTarget = $('againBtn').classList.contains('hidden') ? $('menuBtn') : $('againBtn');
+    focusTarget.focus();
+  }, 0);
+}
+
+function showGameOver(status, { celebrate = true } = {}) {
+  const key = stateKey(G.state) + '|' + status.status;
+  if (resolutionKey === key) return;
+  resolutionKey = key;
   clearTimeout(botTimer);
+  clearTimeout(gameOverTimer);
+  clearPresentation();
   save(); // clears the save — game's done
   const title = $('go-title');
   const line = $('go-line');
   const pick = WIN_LINES[(Math.random() * WIN_LINES.length) | 0];
+  const reaction = mayorReaction(status);
 
   if (status.status === 'blocked') {
     title.textContent = 'GRIDLOCK!';
@@ -544,10 +849,10 @@ function showGameOver(status) {
       : `Nobody could move, and ${names} tie for fewest cards. Split the maple candy.`;
   } else if (G.mode === 'bot' && status.winner === BOT) {
     title.textContent = 'THE MAYOR TAKES IT';
-    line.textContent = 'City Hall wins this round. File for a rematch — democracy encourages it.';
+    line.textContent = 'City Hall wins this round.';
   } else if (G.mode === 'bot') {
     title.textContent = 'YOU WIN! 👑';
-    line.textContent = pick + ' The Mayor tips his hat to you.';
+    line.textContent = pick;
   } else if (G.mode === 'online') {
     const iWon = status.winner === online.myPlayer;
     title.textContent = iWon ? 'YOU WIN! 👑' : `${playerName(status.winner).toUpperCase()} WINS! 👑`;
@@ -558,7 +863,10 @@ function showGameOver(status) {
     title.textContent = playerName(status.winner).toUpperCase() + ' WINS! 👑';
     line.textContent = pick;
   }
+  if (reaction) line.textContent += ` ${reaction}`;
   show('gameover');
+  if (celebrate) animateResolution(localPlayerWon(status));
+  else ($('againBtn').classList.contains('hidden') ? $('menuBtn') : $('againBtn')).focus();
 }
 
 /* ---------------------------------------------------------------- menu */
@@ -573,14 +881,19 @@ $('resumeBtn').addEventListener('click', () => {
   const saved = loadSave();
   if (!saved) { $('resumeBtn').classList.add('hidden'); return; }
   clearTimeout(botTimer);
+  clearTimeout(gameOverTimer);
+  clearPresentation();
   sel = null;
+  resolutionKey = '';
   G = saved;
+  setConfirmedStateCold(G.state);
   if (G.mode === 'pass') {
     showHandoff(G.state.currentPlayer);
   } else {
     handRevealed = true;
     show('game');
     render({ dealAll: true });
+    maybeShowCoach();
     if (G.state.currentPlayer === BOT) botTimer = setTimeout(botStep, 850);
   }
 });
@@ -588,6 +901,7 @@ $('resumeBtn').addEventListener('click', () => {
 function goMenu() {
   clearTimeout(botTimer);
   clearTimeout(gameOverTimer);
+  clearPresentation();
   sel = null;
   if (online) {
     online.match.leave();
@@ -595,6 +909,9 @@ function goMenu() {
     onlineBusy = false;
     G = null;
   }
+  confirmedState = null;
+  confirmedKey = '';
+  resolutionKey = '';
   $('homeBtn').dataset.armed = '';
   $('homeBtn').textContent = '🏠';
   $('resumeBtn').classList.toggle('hidden', !loadSave());
@@ -623,8 +940,8 @@ $('againBtn').addEventListener('click', () => {
 /* ------------------------------------------------------------- online play */
 // Two phones share the engine's complete JSON state through js/rooms.js.
 // Seat 0 hosts and is the player createInitialState() makes first. Remote
-// states repaint cold: pile-slide diffs are ambiguous, while a full render
-// safely handles multi-play turns, conflict truth, resume, and rematches.
+// states are diffed only against the last confirmed state; entry, reconnect,
+// and rematches are marked cold so hydration never replays presentation.
 
 const GAME = 'kings-corner';
 let panelIntent = 'host';
@@ -799,15 +1116,24 @@ function refreshRejoin() {
 function enterOnlineGame(match) {
   clearTimeout(botTimer);
   clearTimeout(gameOverTimer);
+  clearPresentation();
   online = { match, myPlayer: match.seat };
   onlineBusy = false;
   pollErrors = 0;
   sel = null;
   handRevealed = true;
+  resolutionKey = '';
   G = { mode: 'online', state: match.state };
+  setConfirmedStateCold(G.state);
   $('againBtn').classList.remove('hidden');
-  show('game');
-  render({ dealAll: true });
+  const initialStatus = getStatus(G.state);
+  if (initialStatus.status === 'active') {
+    show('game');
+    render({ dealAll: true });
+    maybeShowCoach();
+  } else {
+    showGameOver(initialStatus, { celebrate: false });
+  }
   match.start({
     onState: onRemoteState,
     onStatus: onRemoteStatus,
@@ -827,12 +1153,19 @@ function onRemoteState(newState) {
   onlineBusy = false;
   const status = getStatus(G.state);
   if (status.status === 'active') {
+    resolutionKey = '';
     $('againBtn').classList.remove('hidden');
     show('game');
-    render();
+    acceptConfirmedState(G.state);
   } else {
-    render();
-    showGameOver(status);
+    const key = stateKey(G.state) + '|' + status.status;
+    if (resolutionKey === key) return;
+    show('game');
+    acceptConfirmedState(G.state);
+    const activeGame = G;
+    gameOverTimer = setTimeout(() => {
+      if (G === activeGame && getStatus(G.state).status !== 'active') showGameOver(status);
+    }, G.state.lastAction?.type === 'play' ? 900 : 500);
   }
 }
 
@@ -840,6 +1173,8 @@ function onRemoteStatus(status) {
   if (status !== 'over' || !online || getStatus(G.state).status !== 'active') return;
   const opp = online.match.opponents().find((candidate) => candidate.left);
   if (!opp?.left) return;
+  clearPresentation();
+  resolutionKey = 'player-left|' + (opp.name || '');
   $('go-title').textContent = `${(opp.name || 'Your neighbor').toUpperCase()} LEFT THE PARK`;
   $('go-line').textContent = 'The table is packed up for now.';
   $('againBtn').classList.add('hidden');
@@ -860,9 +1195,13 @@ function onPollError(err) {
   if (err?.code === 'not_found') {
     online.match.stop();
     clearSession(GAME);
+    clearPresentation();
     online = null;
     onlineBusy = false;
     G = null;
+    confirmedState = null;
+    confirmedKey = '';
+    resolutionKey = '';
     show('menu');
     refreshRejoin();
     return;
@@ -886,7 +1225,7 @@ async function pushOnline() {
     if (err?.code === 'version_conflict') {
       G.state = match.state;
       sel = null;
-      render();
+      acceptConfirmedState(G.state);
       return false;
     }
     await new Promise((resolve) => setTimeout(resolve, 1500));
@@ -900,7 +1239,7 @@ async function pushOnline() {
       if (!online || online.match !== match || !G) return false;
       G.state = match.state;
       sel = null;
-      render();
+      acceptConfirmedState(G.state);
       return false;
     }
   }
@@ -910,12 +1249,16 @@ async function onlineRematch() {
   if (!online || onlineBusy) return;
   const match = online.match;
   clearTimeout(gameOverTimer);
+  clearPresentation();
+  resolutionKey = '';
   const fresh = createInitialState({ numPlayers: G.state.numPlayers, seed: newSeed() });
   G.state = fresh;
+  setConfirmedStateCold(fresh);
   sel = null;
   onlineBusy = true;
   show('game');
   render({ dealAll: true });
+  maybeShowCoach();
   try {
     await match.push(fresh);
     pollErrors = 0;
@@ -927,6 +1270,7 @@ async function onlineRematch() {
       onPollError(err);
       G.state = match.state;
     }
+    setConfirmedStateCold(G.state);
   } finally {
     if (!online || online.match !== match || !G) return;
     onlineBusy = false;
@@ -935,7 +1279,7 @@ async function onlineRematch() {
       show('game');
       render();
     } else {
-      showGameOver(status);
+      showGameOver(status, { celebrate: false });
     }
   }
 }

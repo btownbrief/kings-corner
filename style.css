@@ -298,6 +298,23 @@ html, body {
   cursor: pointer;
   touch-action: manipulation;
 }
+#mute {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  border: 2px solid rgba(246, 239, 220, 0.25);
+  background: rgba(18, 53, 36, 0.55);
+  color: var(--cream);
+  font-size: 17px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+#homeBtn:focus-visible,
+#mute:focus-visible {
+  outline: 3px solid var(--sun);
+  outline-offset: 2px;
+}
 
 #opponents {
   flex: 1;
@@ -336,6 +353,18 @@ html, body {
 .opp.active {
   border-color: var(--sun);
   box-shadow: 0 0 0 2px rgba(242, 162, 74, 0.35), 0 0 18px rgba(242, 162, 74, 0.35);
+}
+.opp.one-card,
+#handLabel.one-card {
+  color: #fff0b8;
+  border-color: var(--sun);
+  animation: one-card-pulse 0.72s ease-in-out 2;
+}
+@keyframes one-card-pulse {
+  50% {
+    transform: scale(1.12);
+    box-shadow: 0 0 0 5px rgba(242, 162, 74, 0.2), 0 0 24px rgba(242, 162, 74, 0.65);
+  }
 }
 
 #table {
@@ -437,6 +466,37 @@ html, body {
   pointer-events: none;
 }
 .cell.corner .cell-label { font-size: 12px; bottom: -18px; }
+.cell.corner.corner-claimed .pilecards {
+  animation: corner-claimed 0.72s cubic-bezier(0.2, 1.35, 0.4, 1);
+}
+@keyframes corner-claimed {
+  0% { box-shadow: 0 0 0 0 rgba(255, 204, 82, 0); }
+  38% {
+    transform: scale(1.13);
+    box-shadow:
+      0 0 0 6px rgba(255, 220, 113, 0.92),
+      0 0 34px 14px rgba(242, 162, 74, 0.75);
+  }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 204, 82, 0); }
+}
+.corner-spark {
+  position: absolute;
+  z-index: 9;
+  left: 50%;
+  top: 42%;
+  width: 7px;
+  height: 7px;
+  margin: -3px;
+  border-radius: 50%;
+  background: #ffe59b;
+  box-shadow: 0 0 8px #ffc24e;
+  pointer-events: none;
+  animation: corner-spark 0.78s ease-out forwards;
+}
+@keyframes corner-spark {
+  from { transform: rotate(var(--angle)) translateX(5px) scale(1); opacity: 1; }
+  to { transform: rotate(var(--angle)) translateX(var(--distance)) scale(0.15); opacity: 0; }
+}
 
 /* pile size chip */
 .pile-count {
@@ -590,6 +650,13 @@ html, body {
   padding-top: 16px; /* headroom for lifted playable cards */
 }
 #handLabel {
+  width: fit-content;
+  min-height: 18px;
+  margin-left: auto;
+  margin-right: auto;
+  padding: 2px 9px;
+  border: 1px solid transparent;
+  border-radius: 999px;
   text-align: center;
   font-size: 11px;
   font-weight: 800;
@@ -695,6 +762,87 @@ html, body {
   100% { transform: scale(1) rotate(0) translateY(0); }
 }
 
+/* ---------------------------------------------------- non-blocking effects */
+
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+#fxBanner {
+  position: fixed;
+  z-index: 60;
+  left: 50%;
+  top: 42%;
+  width: min(90vw, 390px);
+  transform: translate(-50%, -50%);
+  padding: 13px 17px;
+  border: 3px solid #ffe29a;
+  border-radius: 15px;
+  background: linear-gradient(180deg, #ffc552, var(--sun));
+  box-shadow: 0 8px 0 var(--pine), 0 20px 45px rgba(0, 0, 0, 0.48);
+  color: var(--pine);
+  font-size: clamp(18px, 5vw, 25px);
+  font-weight: 1000;
+  letter-spacing: 0.07em;
+  text-align: center;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.45);
+  pointer-events: none;
+}
+#fxBanner.show {
+  display: block !important;
+  animation: fx-banner 1.35s ease forwards;
+}
+@keyframes fx-banner {
+  0% { opacity: 0; transform: translate(-50%, -42%) scale(0.76) rotate(-2deg); }
+  15%, 72% { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(0); }
+  100% { opacity: 0; transform: translate(-50%, -57%) scale(0.97); }
+}
+
+#coach {
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0 16px calc(env(safe-area-inset-bottom, 0px) + 138px);
+  background: linear-gradient(180deg, transparent 45%, rgba(6, 18, 12, 0.55));
+  pointer-events: none;
+}
+.coach-card {
+  width: min(92vw, 390px);
+  padding: 13px 16px 11px;
+  border: 2px solid var(--sun);
+  border-radius: 15px;
+  background: rgba(18, 53, 36, 0.97);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  color: var(--cream);
+  text-align: center;
+  animation: coach-in 0.32s ease-out;
+}
+.coach-card strong,
+.coach-card span,
+.coach-card small { display: block; }
+.coach-card strong {
+  margin-bottom: 4px;
+  color: var(--sun);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+}
+.coach-card span { font-size: 14px; font-weight: 750; line-height: 1.35; }
+.coach-card small { margin-top: 5px; color: var(--cream-dim); font-size: 10px; }
+@keyframes coach-in {
+  from { opacity: 0; transform: translateY(18px); }
+}
+
 /* ---------------------------------------------------------------- game over */
 
 #gameover {
@@ -727,6 +875,14 @@ html, body {
   text-shadow: 0 3px 0 rgba(0, 0, 0, 0.35);
   transform: rotate(-2deg);
 }
+#gameover.resolving #go-title {
+  animation: title-spring 0.68s cubic-bezier(0.18, 1.45, 0.35, 1) both;
+}
+@keyframes title-spring {
+  from { opacity: 0; transform: translateY(-34px) scale(0.62) rotate(-7deg); }
+  70% { transform: translateY(3px) scale(1.07) rotate(1deg); }
+  to { opacity: 1; transform: translateY(0) scale(1) rotate(-2deg); }
+}
 #go-line {
   font-size: 14px;
   font-weight: 600;
@@ -751,6 +907,32 @@ html, body {
 }
 #brief-cta strong { color: #ffd9a0; font-size: 14px; }
 #brief-cta:active { background: rgba(242, 162, 74, 0.3); }
+
+.sweep-card {
+  position: fixed;
+  z-index: 0;
+  left: -70px;
+  top: var(--top);
+  width: 42px;
+  aspect-ratio: 5 / 7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #d7caab;
+  border-radius: 7px;
+  background: var(--cream);
+  color: var(--ink, var(--card-black));
+  box-shadow: 0 7px 16px rgba(0, 0, 0, 0.35);
+  font-size: 20px;
+  font-weight: 900;
+  pointer-events: none;
+  animation: card-sweep 1.25s var(--delay) cubic-bezier(0.18, 0.78, 0.3, 1) forwards;
+}
+@keyframes card-sweep {
+  from { transform: translateX(0) translateY(20px) rotate(-25deg); opacity: 0; }
+  12% { opacity: 0.85; }
+  to { transform: translateX(calc(100vw + 130px)) translateY(-90px) rotate(310deg); opacity: 0; }
+}
 
 /* --------------------------------------------------------- compact phones */
 
@@ -998,4 +1180,36 @@ html, body {
   #menu .menu-inner { gap: 1.5vh; }
   #onlineRow { margin-bottom: -0.5vh; }
   #howto { gap: 4px; }
+}
+
+/* Motion-sensitive players still get every text/status cue, without travel,
+   shake, pulsing, particles, or spring effects. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  #fxBanner.show {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+    animation: none !important;
+  }
+  #gameover.resolving #go-title {
+    opacity: 1;
+    transform: rotate(-2deg);
+    animation: none !important;
+  }
+  .opp.one-card,
+  #handLabel.one-card {
+    box-shadow: 0 0 0 3px rgba(242, 162, 74, 0.55);
+    animation: none !important;
+  }
+  .corner-spark,
+  .sweep-card {
+    display: none !important;
+  }
 }
