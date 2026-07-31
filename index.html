@@ -127,6 +127,7 @@
     <div id="topbar">
       <button id="homeBtn" aria-label="Back to menu">🏠</button>
       <div id="opponents"></div>
+      <button id="mute" aria-label="Mute sound" aria-pressed="false">🔊</button>
     </div>
 
     <div id="table">
@@ -157,7 +158,19 @@
       <div id="handLabel"></div>
       <div id="hand"></div>
     </div>
+
+    <div id="coach" class="hidden" role="status">
+      <div class="coach-card">
+        <strong>FIRST DEAL</strong>
+        <span>Streets build down, alternating colors — corners are for Kings.</span>
+        <small>Tap anywhere to dismiss</small>
+      </div>
+    </div>
   </div>
+
+  <!-- Non-blocking, coalescing presentation effects -->
+  <div id="fxBanner" class="hidden" aria-hidden="true"></div>
+  <div id="fxStatus" class="sr-only" role="status" aria-live="polite"></div>
 
   <!-- Round over -->
   <div id="gameover" class="screen hidden">
