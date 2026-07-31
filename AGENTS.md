@@ -37,10 +37,10 @@ code + the entire engine state as opaque JSON + a version number. After a
 move, the moving phone pushes the new state with the version it last saw;
 everyone else polls. All rules stay in `engine.js` — `rooms.js` knows
 nothing about Kings Corner. The host sits in engine seat 0, the player
-`createInitialState()` makes first; the joiner is seat 1. Online UI renders
-only this phone's hand and shows the opponent's card count. If the backend
-SQL isn't installed yet, the client gets a clean `not_ready` error and the
-UI says online play isn't switched on.
+`createInitialState()` makes first; joiners fill seats 1–3 in order. Online
+UI renders only this phone's hand and shows every opponent's card count. If
+the backend SQL isn't installed yet, the client gets a clean `not_ready`
+error and the UI says online play isn't switched on.
 
 `scripts/rooms-shim.mjs` is the verbatim local stand-in from
 `four-in-a-rowboat`, so everything is testable offline:

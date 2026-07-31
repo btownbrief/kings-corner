@@ -11,7 +11,7 @@ the phone across the table. Part of
 
 ## House rules
 
-- 2 players, 7 cards each. The stock sits in the middle of the park and
+- 2–4 players, 7 cards each. The stock sits in the middle of the park and
   four cards are flipped to the cross-streets (Pearl, Cherry, Main, Bank).
   The four park corners start empty — **Kings only**.
 - On your turn, **first draw one card** from the stock, then play as many
@@ -33,7 +33,7 @@ Plain static site — no build step. `index.html` + `style.css` + ES modules in 
 
 | file | what it does |
 | --- | --- |
-| `js/engine.js` | **all** the rules, as pure functions over one JSON-serializable state object (seeded RNG lives in the state — same seed, same deal; supports 2–4 players for later) |
+| `js/engine.js` | **all** the rules, as pure functions over one JSON-serializable state object (seeded RNG lives in the state — same seed, same deal; supports 2–4 players) |
 | `js/bot.js` | the Mayor's brain — picks among the engine's legal moves, preferring pile slides that free up foundation slots, then Kings to corners, then shedding what fits |
 | `js/main.js` | UI only: screens, tap-to-select-and-place, the pile-slide animation, bot pacing, pass-the-phone handoffs, localStorage resume |
 
