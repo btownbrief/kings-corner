@@ -1,5 +1,5 @@
 // Online-rooms wiring test: drives the real vendored client (js/rooms.js)
-// against the local shim (scripts/rooms-shim.mjs) as two simulated phones,
+// against the local shim (scripts/rooms-shim.mjs) as simulated phones,
 // then plays through the real Kings Corner engine. No network or Supabase.
 //
 //   node scripts/test-rooms.mjs
@@ -9,7 +9,7 @@ import { createInitialState, legalMoves, applyMove, getStatus } from '../js/engi
 
 const GAME = 'kings-corner';
 
-/* ------------------------------------------------- two-phone environment */
+/* ----------------------------------------------------- phone environment */
 
 const stores = new Map();
 let current = 'A';
@@ -146,29 +146,38 @@ function randomMove(state) {
   return endings[randomIndex(endings.length)];
 }
 
-let movesPlayed = 0;
-while (getStatus(host.state).status === 'active' && movesPlayed < 400) {
-  const seat = host.state.currentPlayer;
-  const mover = phones[seat];
-  device(mover.device);
-  await mover.match._fetch();
-  const next = applyMove(mover.match.state, randomMove(mover.match.state));
-  await mover.match.push(next, { over: getStatus(next).status !== 'active' });
+async function playSyncedGame(table, maxMoves = 400) {
+  const reference = table[0].match;
+  let moves = 0;
+  while (getStatus(reference.state).status === 'active' && moves < maxMoves) {
+    const seat = reference.state.currentPlayer;
+    const mover = table.find((phone) => phone.match.seat === seat);
+    device(mover.device);
+    await mover.match._fetch();
+    const next = applyMove(mover.match.state, randomMove(mover.match.state));
+    await mover.match.push(next, { over: getStatus(next).status !== 'active' });
 
-  for (const phone of phones) {
-    device(phone.device);
-    await phone.match._fetch();
+    for (const phone of table) {
+      device(phone.device);
+      await phone.match._fetch();
+    }
+    const truth = JSON.stringify(reference.state);
+    if (table.some((phone) => JSON.stringify(phone.match.state) !== truth)) {
+      return { moves: moves + 1, finished: false, synced: false };
+    }
+    moves++;
   }
-  if (JSON.stringify(host.state) !== JSON.stringify(guest.state)) {
-    console.error(`FAIL: phones diverged after engine move ${movesPlayed + 1}`);
-    process.exit(1);
-  }
-  movesPlayed++;
+  return {
+    moves,
+    finished: getStatus(reference.state).status !== 'active',
+    synced: true,
+  };
 }
 
+const twoPhone = await playSyncedGame(phones);
 const finalStatus = getStatus(host.state);
-t(movesPlayed > 0, `phones stay synced through ${movesPlayed} engine moves`);
-t(finalStatus.status !== 'active' || movesPlayed === 400,
+t(twoPhone.synced && twoPhone.moves > 0, `phones stay synced through ${twoPhone.moves} engine moves`);
+t(finalStatus.status !== 'active' || twoPhone.moves === 400,
   finalStatus.status === 'active' ? '400-move cap reached cleanly' : `full game ends ${finalStatus.status}`);
 t(JSON.stringify(host.state) === JSON.stringify(guest.state),
   'both phones finish with JSON-identical states');
@@ -199,6 +208,7 @@ const secondHost = await OnlineMatch.create({
   game: GAME,
   name: 'A',
   state: createInitialState({ numPlayers: 2, seed: 12 }),
+  seats: 2,
 });
 device('B');
 await OnlineMatch.join({ game: GAME, code: secondHost.code, name: 'B' });
@@ -207,6 +217,54 @@ await expectCode(
   OnlineMatch.join({ game: GAME, code: secondHost.code, name: 'C' }),
   'room_started',
   'third phone is turned away',
+);
+
+/* ------------------------------------------------------- three-phone game */
+
+device('A');
+const host3 = await OnlineMatch.create({
+  game: GAME,
+  name: 'North',
+  state: createInitialState({ numPlayers: 3, seed: 404 }),
+  seats: 3,
+});
+device('B');
+const guest3b = await OnlineMatch.join({ game: GAME, code: host3.code, name: 'Center' });
+t(guest3b.seat === 1 && guest3b.status === 'waiting',
+  'three-phone room keeps waiting after seat 1 joins');
+device('C');
+const guest3c = await OnlineMatch.join({ game: GAME, code: host3.code, name: 'South' });
+t(guest3c.seat === 2 && guest3c.status === 'playing',
+  'three-phone room starts only when seat 2 fills the table');
+
+for (const phone of [
+  { device: 'A', match: host3 },
+  { device: 'B', match: guest3b },
+  { device: 'C', match: guest3c },
+]) {
+  device(phone.device);
+  await phone.match._fetch();
+}
+t(host3.status === 'playing' &&
+    host3.opponents().map((opponent) => opponent.name).join(',') === 'Center,South',
+  'host sees both joined names when the three-seat table fills');
+
+const threePhone = await playSyncedGame([
+  { device: 'A', match: host3 },
+  { device: 'B', match: guest3b },
+  { device: 'C', match: guest3c },
+], 1000);
+t(threePhone.synced, 'all three phones stay JSON-identical after every move');
+t(threePhone.finished,
+  `full three-phone game reaches engine game-over in ${threePhone.moves} moves`);
+t(host3.state.numPlayers === 3 && host3.state.hands.length === 3,
+  'three-phone state preserves all three engine seats');
+
+device('D');
+await expectCode(
+  OnlineMatch.join({ game: GAME, code: host3.code, name: 'Too Late' }),
+  'room_started',
+  'fourth phone cannot enter the started three-seat room',
 );
 
 // Backend not installed: 404 RPCs become a clean not_ready error.
@@ -218,5 +276,5 @@ await expectCode(
   'missing backend reads as not_ready',
 );
 
-console.log(`\nALL ROOMS TESTS PASSED (${passed} checks, ${movesPlayed} engine moves)`);
+console.log(`\nALL ROOMS TESTS PASSED (${passed} checks, ${twoPhone.moves + threePhone.moves} engine moves)`);
 process.exit(0);

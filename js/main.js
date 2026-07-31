@@ -34,11 +34,13 @@ document.querySelectorAll('#park .cell[data-pile]').forEach((el) => { cellEls[el
 const onlinePanel = $('onlinePanel');
 const opTitle = $('opTitle');
 const opName = $('opName');
+const opSeatsWrap = $('opSeatsWrap');
 const opCodeWrap = $('opCodeWrap');
 const opCode = $('opCode');
 const opError = $('opError');
 const lobbyEl = $('lobby');
 const lobbyCode = $('lobbyCode');
+const lobbyNames = $('lobbyNames');
 const rejoinBtn = $('rejoinBtn');
 
 let G = null;             // { mode: 'bot' | 'pass' | 'online', state }
@@ -303,7 +305,8 @@ function renderMessage(moves, myTurn, mustDraw, onlyEndTurn) {
     }
   } else if (lines.length === 0) {
     if (G.mode === 'online') {
-      const opp = online.match.opponents()[0] || {};
+      const opp = online.match.opponents()
+        .find((candidate) => candidate.seat === state.currentPlayer) || {};
       lines.push(opp.away
         ? `${esc(opp.name || 'Your neighbor')} stepped away from the table…`
         : `Waiting on ${esc(opp.name || 'your neighbor')}…`);
@@ -488,13 +491,13 @@ function botStep() {
 
 /* ---------------------------------------------------------------- flow */
 
-function startGame(mode) {
+function startGame(mode, numPlayers) {
   clearTimeout(botTimer);
   clearTimeout(gameOverTimer);
   sel = null;
   online = null;
   onlineBusy = false;
-  G = { mode, state: createInitialState({ numPlayers: 2, seed: newSeed() }) };
+  G = { mode, state: createInitialState({ numPlayers, seed: newSeed() }) };
   $('againBtn').classList.remove('hidden');
   save();
   if (mode === 'pass') {
@@ -560,8 +563,11 @@ function showGameOver(status) {
 
 /* ---------------------------------------------------------------- menu */
 
-$('botBtn').addEventListener('click', () => startGame('bot'));
-$('passBtn').addEventListener('click', () => startGame('pass'));
+$('botBtn').addEventListener('click', () => startGame('bot', 2));
+$('passBtn').addEventListener('click', () => $('countRow').classList.toggle('hidden'));
+document.querySelectorAll('.count-btn').forEach((btn) => {
+  btn.addEventListener('click', () => startGame('pass', +btn.dataset.n));
+});
 
 $('resumeBtn').addEventListener('click', () => {
   const saved = loadSave();
@@ -611,7 +617,7 @@ $('homeBtn').addEventListener('click', () => {
 $('menuBtn').addEventListener('click', goMenu);
 $('againBtn').addEventListener('click', () => {
   if (G.mode === 'online') onlineRematch();
-  else startGame(G.mode);
+  else startGame(G.mode, G.state.numPlayers);
 });
 
 /* ------------------------------------------------------------- online play */
@@ -622,6 +628,7 @@ $('againBtn').addEventListener('click', () => {
 
 const GAME = 'kings-corner';
 let panelIntent = 'host';
+let selectedSeats = 2;
 let pollErrors = 0;
 
 $('hostBtn').addEventListener('click', () => openPanel('host'));
@@ -636,11 +643,22 @@ opCode.addEventListener('input', () => {
 [opName, opCode].forEach((el) => el.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') onlineGo();
 }));
+document.querySelectorAll('.seat-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    selectedSeats = +btn.dataset.seats;
+    document.querySelectorAll('.seat-btn').forEach((choice) => {
+      const selected = choice === btn;
+      choice.classList.toggle('selected', selected);
+      choice.setAttribute('aria-pressed', String(selected));
+    });
+  });
+});
 
 function openPanel(intent) {
   panelIntent = intent;
   opTitle.textContent = intent === 'host' ? 'OPEN A TABLE' : 'JOIN A TABLE';
   $('opGo').textContent = intent === 'host' ? 'GET A CODE' : 'TAKE A SEAT';
+  opSeatsWrap.classList.toggle('hidden', intent !== 'host');
   opCodeWrap.classList.toggle('hidden', intent === 'host');
   opError.classList.add('hidden');
   opName.value = opName.value || getName();
@@ -654,7 +672,7 @@ function closePanel() {
 
 const FRIENDLY_ERRORS = {
   not_found: 'No table with that code — check the letters.',
-  room_full: 'That park table already has two players.',
+  room_full: 'That park table is already full.',
   room_started: 'That deal is already underway.',
   not_ready: "Online play isn't switched on yet — check back soon!",
   offline: "Can't reach the park — are you online?",
@@ -685,8 +703,8 @@ async function onlineGo() {
       const match = await OnlineMatch.create({
         game: GAME,
         name,
-        state: createInitialState({ numPlayers: 2, seed: newSeed() }),
-        seats: 2,
+        seats: selectedSeats,
+        state: createInitialState({ numPlayers: selectedSeats, seed: newSeed() }),
       });
       closePanel();
       openLobby(match);
@@ -700,7 +718,8 @@ async function onlineGo() {
       }
       const match = await OnlineMatch.join({ game: GAME, code, name });
       closePanel();
-      enterOnlineGame(match);
+      if (match.status === 'waiting') openLobby(match);
+      else enterOnlineGame(match);
     }
   } catch (err) {
     opError.textContent = friendly(err);
@@ -710,20 +729,39 @@ async function onlineGo() {
   }
 }
 
+function renderLobby(match) {
+  lobbyCode.textContent = match.code;
+  lobbyNames.innerHTML = '';
+  const total = match.state?.numPlayers || selectedSeats;
+  for (let seat = 0; seat < total; seat++) {
+    const joined = match.seats.find((s) => s.seat === seat);
+    const item = document.createElement('li');
+    item.textContent = joined
+      ? `${joined.name} · Player ${seat + 1}`
+      : `Waiting for Player ${seat + 1}…`;
+    lobbyNames.appendChild(item);
+  }
+}
+
 function openLobby(match) {
   if (lobbyEl._match && lobbyEl._match !== match) lobbyEl._match.stop();
-  lobbyCode.textContent = match.code;
+  $('lobbyHint').textContent =
+    'the rest of the table opens Kings Corner, taps JOIN A TABLE, and types it in';
+  renderLobby(match);
   lobbyEl.classList.remove('hidden');
+  lobbyEl._match = match;
   match.start({
     onStatus: (status) => {
       if (status === 'playing') {
         lobbyEl.classList.add('hidden');
         enterOnlineGame(match);
+      } else if (status === 'over') {
+        $('lobbyHint').textContent = 'Someone left the park table. Pack up and open a new one.';
       }
     },
-    onError: () => {},
+    onPresence: () => renderLobby(match),
+    onError: () => {}, // waiting-room hiccups resolve on the next poll
   });
-  lobbyEl._match = match;
 }
 
 function cancelLobby() {
@@ -800,7 +838,7 @@ function onRemoteState(newState) {
 
 function onRemoteStatus(status) {
   if (status !== 'over' || !online || getStatus(G.state).status !== 'active') return;
-  const opp = online.match.opponents()[0];
+  const opp = online.match.opponents().find((candidate) => candidate.left);
   if (!opp?.left) return;
   $('go-title').textContent = `${(opp.name || 'Your neighbor').toUpperCase()} LEFT THE PARK`;
   $('go-line').textContent = 'The table is packed up for now.';
@@ -809,7 +847,7 @@ function onRemoteStatus(status) {
 }
 
 function onRemotePresence(opponents) {
-  const opp = opponents[0];
+  const opp = opponents.find((candidate) => candidate.left);
   pollErrors = 0;
   if (opp?.left) $('againBtn').classList.add('hidden');
   if (!onlineBusy && screens.game.classList.contains('hidden') === false) {
@@ -872,7 +910,7 @@ async function onlineRematch() {
   if (!online || onlineBusy) return;
   const match = online.match;
   clearTimeout(gameOverTimer);
-  const fresh = createInitialState({ numPlayers: 2, seed: newSeed() });
+  const fresh = createInitialState({ numPlayers: G.state.numPlayers, seed: newSeed() });
   G.state = fresh;
   sel = null;
   onlineBusy = true;

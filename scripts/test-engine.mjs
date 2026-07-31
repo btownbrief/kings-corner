@@ -41,9 +41,33 @@ function allCards(state) {
   assert(CORNERS.every((k) => a.piles[k].length === 0), 'all four corners start empty');
   const cards = allCards(a);
   assert(cards.length === 52 && new Set(cards).size === 52, 'full 52-card deck accounted for');
-  const four = createInitialState({ numPlayers: 4, seed: 7 });
-  assert(four.hands.length === 4 && four.hands.every((h) => h.length === 7),
-    '4 players also get 7 cards each (design anticipates 3-4)');
+}
+
+/* --------------------------------------- 3- and 4-player table behavior */
+for (const numPlayers of [3, 4]) {
+  let s = createInitialState({ numPlayers, seed: 700 + numPlayers });
+  assert(s.hands.length === numPlayers && s.hands.every((hand) => hand.length === 7),
+    `${numPlayers} players get 7 cards each`);
+
+  for (let player = 0; player < numPlayers; player++) {
+    s = applyMove(s, { type: 'draw' });
+    s = applyMove(s, { type: 'endTurn' });
+    assert(s.currentPlayer === (player + 1) % numPlayers,
+      `${numPlayers}-player turns rotate from Player ${player + 1} to Player ${(player + 1) % numPlayers + 1}`);
+  }
+
+  const winningSeat = numPlayers - 1;
+  const winState = fixture({
+    numPlayers,
+    hands: Array.from({ length: numPlayers }, (_, seat) =>
+      seat === winningSeat ? ['8S'] : ['2C', '3C']),
+    piles: { ...emptyPiles(), N: ['9H'], E: ['TS'], S: ['9D'], W: ['QC'] },
+    stock: [],
+    currentPlayer: winningSeat,
+  });
+  const won = applyMove(winState, { type: 'play', card: '8S', to: 'N' });
+  assert(getStatus(won).status === 'won' && getStatus(won).winner === winningSeat,
+    `${numPlayers}-player game detects Player ${winningSeat + 1}'s win immediately`);
 }
 
 /* ---------------------------------- descending alternating-color legality */

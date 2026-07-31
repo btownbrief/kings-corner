@@ -35,8 +35,18 @@
 
       <button id="resumeBtn" class="big-btn hidden">↩&nbsp; BACK TO THE PARK</button>
       <button id="botBtn" class="big-btn">🎩&nbsp; TAKE ON THE MAYOR</button>
-      <button id="passBtn" class="mode-btn">📱 PASS &amp; PLAY (2 PLAYERS)</button>
-      <div class="online-label">or deal across town — two phones</div>
+      <div id="passSetup">
+        <button id="passBtn" class="mode-btn">📱 PASS &amp; PLAY</button>
+        <div id="countRow" class="hidden">
+          <span class="count-label">HOW MANY AT THE TABLE?</span>
+          <div class="count-btns">
+            <button class="count-btn" data-n="2">2</button>
+            <button class="count-btn" data-n="3">3</button>
+            <button class="count-btn" data-n="4">4</button>
+          </div>
+        </div>
+      </div>
+      <div class="online-label">or deal across town — two to four phones</div>
       <div id="onlineRow">
         <button id="hostBtn" class="mode-btn">
           <span class="online-name">🌳 OPEN A TABLE</span>
@@ -56,12 +66,20 @@
       </div>
     </div>
 
-    <!-- Online setup: name (+ code when joining) -->
+    <!-- Online setup: name, crew size for hosts, and code for joiners -->
     <div id="onlinePanel" class="overlay hidden">
       <div class="op-card">
         <div id="opTitle" class="op-title">OPEN A TABLE</div>
         <label class="op-label" for="opName">YOUR NAME</label>
         <input id="opName" maxlength="24" autocomplete="nickname" placeholder="Neighbor">
+        <div id="opSeatsWrap">
+          <div class="op-label">PHONES AT THE TABLE</div>
+          <div id="opSeats" class="seat-btns" role="group" aria-label="Phones at the table">
+            <button class="seat-btn selected" data-seats="2" aria-pressed="true">2</button>
+            <button class="seat-btn" data-seats="3" aria-pressed="false">3</button>
+            <button class="seat-btn" data-seats="4" aria-pressed="false">4</button>
+          </div>
+        </div>
         <div id="opCodeWrap" class="hidden">
           <label class="op-label" for="opCode">PARK CODE</label>
           <input id="opCode" maxlength="4" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="ABCD">
@@ -74,12 +92,14 @@
       </div>
     </div>
 
-    <!-- Lobby: show the park code while we wait for the friend -->
+    <!-- Lobby: show the park code while we wait for the final seat -->
     <div id="lobby" class="overlay hidden">
       <div class="op-card">
         <div class="op-title">CALL OUT THIS PARK CODE</div>
         <div id="lobbyCode"></div>
         <div id="lobbyHint">they open Kings Corner, tap <b>JOIN A TABLE</b>, and type it in</div>
+        <div class="lobby-label">AT THE TABLE</div>
+        <ul id="lobbyNames" aria-live="polite"></ul>
         <div class="op-btns"><button id="lobbyCancel" class="chip-btn">PACK UP</button></div>
       </div>
     </div>
