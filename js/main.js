@@ -11,6 +11,10 @@ import {
 import { chooseMove } from './bot.js';
 import { OnlineMatch, savedSession, clearSession, getName } from './rooms.js';
 import { sound } from './audio.js';
+import {
+  lbEnabled, fetchTop, submitScore, renamePlayer, monthLabel,
+  getName as lbGetName, playerId as lbPlayerId,
+} from './leaderboard.js';
 
 const SAVE_KEY = 'kings-corner-save-v1';
 const COACH_KEY = 'kings-corner-coach-v1';
@@ -554,6 +558,13 @@ function renderMessage(moves, myTurn, mustDraw, onlyEndTurn) {
 function doMove(move) {
   const mover = G.state.currentPlayer;
   G.state = applyMove(G.state, move);
+  // Leaderboard stat: count the human's completed turns vs the Mayor.
+  // A turn ends when play passes to the bot or the game ends mid-turn.
+  // Stored on G so it survives the localStorage save/resume round-trip.
+  if (G.mode === 'bot' && mover === 0 &&
+      (G.state.currentPlayer === BOT || getStatus(G.state).status !== 'active')) {
+    G.turns = (G.turns || 0) + 1;
+  }
   if (G.mode === 'online') onlineBusy = true;
   else save();
 
@@ -828,6 +839,119 @@ function animateResolution(won) {
   }, 0);
 }
 
+/* ------------------------------------------------------------- leaderboard */
+// Monthly board for vs-Mayor wins only. Score = fewest of your turns to
+// shed your hand: max(1, 100 - turns), so quicker wins rank higher.
+
+const lbBox = $('lb');
+const lbList = $('lbList');
+const lbStatusEl = $('lbStatus');
+const lbForm = $('lbForm');
+const lbNameInput = $('lbNameInput');
+const lbThisBtn = $('lbThisBtn');
+const lbLastBtn = $('lbLastBtn');
+const lbRenameBtn = $('lbRenameBtn');
+let lbMonthOffset = 0;
+
+if (lbEnabled()) {
+  lbThisBtn.textContent = `🏆 ${monthLabel(0)}`;
+  lbLastBtn.textContent = monthLabel(-1);
+}
+
+function resetLbPanel() {
+  lbBox.classList.add('hidden');
+  lbForm.classList.add('hidden');
+  lbForm.dataset.pendingScore = '';
+}
+
+function botWinScore() {
+  return Math.max(1, 100 - (G.turns || 0));
+}
+
+// score 99..2 → 1..98 turns; a floor score of 1 means 99 turns or more
+function lbScoreLabel(s) {
+  return s <= 1 ? '👑 99+ turns' : `👑 ${100 - s} turns`;
+}
+
+// score > 0 submits a fresh win; score 0 just shows the standings read-only
+async function updateLeaderboard(score) {
+  if (!lbEnabled()) return;
+  lbBox.classList.remove('hidden');
+  if (score > 0 && !lbGetName()) {
+    // first win with no saved name: hold the score until they pick one
+    lbForm.classList.remove('hidden');
+    lbRenameBtn.classList.add('hidden');
+    lbStatusEl.textContent = 'Pick a name to join the monthly leaderboard!';
+    lbList.innerHTML = '';
+    lbForm.dataset.pendingScore = String(score);
+    return;
+  }
+  if (score > 0) {
+    try { await submitScore(score); } catch (e) { /* offline — still show the board */ }
+  }
+  renderLbBoard();
+}
+
+async function renderLbBoard() {
+  lbForm.classList.add('hidden');
+  lbRenameBtn.classList.remove('hidden');
+  lbStatusEl.textContent = 'Loading…';
+  try {
+    const rows = await fetchTop(lbMonthOffset);
+    const me = lbPlayerId();
+    lbList.innerHTML = '';
+    rows.slice(0, 10).forEach((r, i) => {
+      const li = document.createElement('li');
+      if (r.player_id === me) li.className = 'me';
+      const medal = ['🥇', '🥈', '🥉'][i];
+      li.innerHTML = '<span class="rank"></span><span class="nm"></span><span class="sc"></span>';
+      li.querySelector('.rank').textContent = medal || `${i + 1}.`;
+      li.querySelector('.nm').textContent = r.name;
+      li.querySelector('.sc').textContent = lbScoreLabel(r.score);
+      lbList.appendChild(li);
+    });
+    const myRank = rows.findIndex((r) => r.player_id === me);
+    lbStatusEl.textContent = rows.length === 0
+      ? 'No scores yet this month — be the first!'
+      : myRank >= 0 ? `You're #${myRank + 1} of ${rows.length} this month` : '';
+  } catch (e) {
+    lbStatusEl.textContent = 'Leaderboard unavailable (offline?)';
+  }
+}
+
+$('lbSaveBtn').addEventListener('click', async () => {
+  const name = lbNameInput.value.trim();
+  if (!name) { lbNameInput.focus(); return; }
+  const pending = Number(lbForm.dataset.pendingScore || 0);
+  lbForm.dataset.pendingScore = '';
+  try {
+    await renamePlayer(name); // saves locally + renames any existing rows
+    if (pending > 0) await submitScore(pending);
+  } catch (e) { /* offline — the name is still saved locally */ }
+  renderLbBoard();
+});
+lbNameInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') $('lbSaveBtn').click();
+});
+lbRenameBtn.addEventListener('click', () => {
+  lbNameInput.value = lbGetName();
+  lbForm.classList.remove('hidden');
+  lbRenameBtn.classList.add('hidden');
+  lbNameInput.focus();
+});
+lbThisBtn.addEventListener('click', () => {
+  lbMonthOffset = 0;
+  lbThisBtn.classList.add('sel');
+  lbLastBtn.classList.remove('sel');
+  renderLbBoard();
+});
+lbLastBtn.addEventListener('click', () => {
+  lbMonthOffset = -1;
+  lbLastBtn.classList.add('sel');
+  lbThisBtn.classList.remove('sel');
+  renderLbBoard();
+});
+
 function showGameOver(status, { celebrate = true } = {}) {
   const key = stateKey(G.state) + '|' + status.status;
   if (resolutionKey === key) return;
@@ -864,6 +988,15 @@ function showGameOver(status, { celebrate = true } = {}) {
     line.textContent = pick;
   }
   if (reaction) line.textContent += ` ${reaction}`;
+  resetLbPanel();
+  if (G.mode === 'bot') {
+    // Exactly once per game: the resolutionKey check above bails on any
+    // repaint of an already-resolved game. Gridlock ties and Mayor wins
+    // still show the standings read-only (score 0). Never runs for
+    // pass-and-play or online — the panel stays hidden there.
+    const humanWon = status.winners.length === 1 && status.winners[0] === 0;
+    updateLeaderboard(humanWon ? botWinScore() : 0);
+  }
   show('gameover');
   if (celebrate) animateResolution(localPlayerWon(status));
   else ($('againBtn').classList.contains('hidden') ? $('menuBtn') : $('againBtn')).focus();
