@@ -36,6 +36,7 @@ Plain static site — no build step. `index.html` + `style.css` + ES modules in 
 | `js/engine.js` | **all** the rules, as pure functions over one JSON-serializable state object (seeded RNG lives in the state — same seed, same deal; supports 2–4 players) |
 | `js/bot.js` | the Mayor's brain — picks among the engine's legal moves, preferring pile slides that free up foundation slots, then Kings to corners, then shedding what fits |
 | `js/main.js` | UI only: screens, tap-to-select-and-place, the pile-slide animation, bot pacing, pass-the-phone handoffs, localStorage resume |
+| `js/leaderboard.js` | monthly leaderboard client (Supabase); vs-Mayor wins only, no accounts |
 
 The engine/UI split is deliberate: online multiplayer later just means
 syncing the engine's state object between phones. Rule logic anywhere
